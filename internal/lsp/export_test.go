@@ -44,6 +44,32 @@ func ExportURIToPath(uri string) (string, error) {
 	return uriToPath(uri)
 }
 
+// ExportSliceDetail exposes sliceDetail for testing.
+func ExportSliceDetail(sd *parser.SliceDef) string {
+	return sliceDetail(sd)
+}
+
+// ExportDocumentSymbol calls textDocumentDocumentSymbol with a fake path and returns the result.
+func (s *Server) ExportDocumentSymbol(filePath string) ([]protocol.DocumentSymbol, error) {
+	uri := filePathToURI(filePath)
+	result, err := s.textDocumentDocumentSymbol(nil, &protocol.DocumentSymbolParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+	})
+	if err != nil || result == nil {
+		return nil, err
+	}
+	syms, ok := result.([]protocol.DocumentSymbol)
+	if !ok {
+		return nil, nil
+	}
+	return syms, nil
+}
+
+// ExportWorkspaceSymbol calls workspaceSymbol with the given query.
+func (s *Server) ExportWorkspaceSymbol(query string) ([]protocol.SymbolInformation, error) {
+	return s.workspaceSymbol(nil, &protocol.WorkspaceSymbolParams{Query: query})
+}
+
 // ExportFilePathToURI exposes filePathToURI for testing.
 func ExportFilePathToURI(p string) protocol.DocumentUri {
 	return filePathToURI(p)

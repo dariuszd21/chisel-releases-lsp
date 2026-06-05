@@ -51,6 +51,8 @@ func New() *Server {
 		TextDocumentCompletion: s.textDocumentCompletion,
 		TextDocumentDefinition: s.textDocumentDefinition,
 		TextDocumentHover:      s.textDocumentHover,
+		TextDocumentDocumentSymbol: s.textDocumentDocumentSymbol,
+		WorkspaceSymbol:            s.workspaceSymbol,
 	}
 	return s
 }
@@ -100,8 +102,10 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{"-"},
 			},
-			DefinitionProvider: &trueVal,
-			HoverProvider:      &trueVal,
+			DefinitionProvider:         &trueVal,
+			HoverProvider:              &trueVal,
+			DocumentSymbolProvider:     &trueVal,
+			WorkspaceSymbolProvider:    &trueVal,
 		},
 		ServerInfo: &protocol.InitializeResultServerInfo{
 			Name:    lsName,

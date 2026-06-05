@@ -310,3 +310,101 @@ slices:
 		t.Errorf("expected zero diagnostics for clean file, got: %v", diags)
 	}
 }
+
+func TestSliceDetail(t *testing.T) {
+	yaml := `package: foo
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/foo:
+      /usr/bin/bar:
+`
+	sf, err := parser.ParseBytes([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail := lsp.ExportSliceDetail(sf.Slices["bins"])
+	if !strings.Contains(detail, "2 contents") {
+		t.Errorf("expected '2 contents' in detail, got %q", detail)
+	}
+	if !strings.Contains(detail, "1 essential") {
+		t.Errorf("expected '1 essential' in detail, got %q", detail)
+	}
+}
+
+func TestDocumentSymbol(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
+slices:
+  bins:
+    contents:
+      /usr/bin/openssl:
+  config:
+    contents:
+      /etc/ssl/openssl.cnf:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	syms, err := srv.ExportDocumentSymbol(filepath.Join(slicesDir, "openssl.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(syms) != 1 {
+		t.Fatalf("expected 1 top-level symbol, got %d", len(syms))
+	}
+	pkg := syms[0]
+	if pkg.Name != "openssl" {
+		t.Errorf("package symbol name: got %q, want %q", pkg.Name, "openssl")
+	}
+	if pkg.Kind != 2 { // SymbolKindModule = 2
+		t.Errorf("package symbol kind: got %d, want Module(2)", pkg.Kind)
+	}
+	if len(pkg.Children) != 2 {
+		t.Fatalf("expected 2 slice children, got %d", len(pkg.Children))
+	}
+	// Children must be in file order: bins, config
+	if pkg.Children[0].Name != "bins" || pkg.Children[1].Name != "config" {
+		t.Errorf("slice children order: got [%q, %q]", pkg.Children[0].Name, pkg.Children[1].Name)
+	}
+}
+
+func TestWorkspaceSymbol(t *testing.T) {
+	idx, _ := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
+slices:
+  bins:
+    contents:
+      /usr/bin/openssl:
+`,
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+
+	// Empty query returns all symbols.
+	all, err := srv.ExportWorkspaceSymbol("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Errorf("empty query: expected 2 symbols, got %d: %v", len(all), all)
+	}
+
+	// Filtered query.
+	filtered, err := srv.ExportWorkspaceSymbol("ssl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 {
+		t.Errorf("'ssl' query: expected 1 symbol, got %d: %v", len(filtered), filtered)
+	}
+	if filtered[0].Name != "openssl_bins" {
+		t.Errorf("filtered symbol name: got %q", filtered[0].Name)
+	}
+}
