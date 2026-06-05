@@ -137,3 +137,14 @@ func (s *Server) ExportCodeAction(filePath string, clientDiags []protocol.Diagno
 	uri := filePathToURI(filePath)
 	return s.computeCodeActions(filePath, uri, clientDiags)
 }
+
+// ExportCompletion calls computeCompletion for testing.
+func (s *Server) ExportCompletion(filePath, text string, line, char int) []protocol.CompletionItem {
+	uri := filePathToURI(filePath)
+	return s.computeCompletion(text, uri, line, char)
+}
+
+// ExportCompletionPrefixAndRange exposes completionPrefixAndRange for testing.
+func ExportCompletionPrefixAndRange(text string, line, char int) (string, protocol.Range) {
+	return completionPrefixAndRange(text, line, char)
+}

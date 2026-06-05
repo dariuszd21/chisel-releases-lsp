@@ -87,6 +87,213 @@ func TestIsInsideEssential_TopLevel(t *testing.T) {
 	}
 }
 
+// --- textDocument/completion ---
+
+// completionText is the document content used by completion tests.
+// Line offsets (0-based):
+//   0: package: foo
+//   1: slices:
+//   2:   bins:
+//   3:     essential:
+//   4:       - libc6_libs       ← existing entry
+//   5:     contents:
+//   6:       /usr/bin/foo:
+const completionText = `package: foo
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/foo:
+`
+
+func TestCompletionPrefixAndRange_WithPrefix(t *testing.T) {
+	// Cursor at "libc6" (partial) on line 4, char 13 — after "      - libc6"
+	prefix, r := lsp.ExportCompletionPrefixAndRange(completionText, 4, 13)
+	if prefix != "libc6" {
+		t.Errorf("prefix: got %q, want %q", prefix, "libc6")
+	}
+	// Range start must be right after "- " (col 8), end = col 13
+	if r.Start.Character != 8 {
+		t.Errorf("range start char: got %d, want 8", r.Start.Character)
+	}
+	if r.End.Character != 18 { // word "libc6_libs" ends at col 18
+		t.Errorf("range end char: got %d, want 18 (end of word)", r.End.Character)
+	}
+}
+
+func TestCompletionPrefixAndRange_TriggerOnly(t *testing.T) {
+	// Cursor right after "-" on a fresh line: "      -" (col 7), no space yet.
+	text := "package: foo\nslices:\n  bins:\n    essential:\n      -\n    contents:\n      /usr/bin/foo:\n"
+	prefix, r := lsp.ExportCompletionPrefixAndRange(text, 4, 7)
+	if prefix != "" {
+		t.Errorf("prefix: got %q, want empty", prefix)
+	}
+	// Start = col 7 (right after "-"), End = col 7 (zero-width insert)
+	if r.Start.Character != 7 || r.End.Character != 7 {
+		t.Errorf("range: got {%d,%d}, want {7,7}", r.Start.Character, r.End.Character)
+	}
+}
+
+func TestCompletionPrefixAndRange_AfterSpace(t *testing.T) {
+	// Cursor at "      - " (col 8, right after the space), nothing typed yet.
+	text := "package: foo\nslices:\n  bins:\n    essential:\n      - \n    contents:\n      /usr/bin/foo:\n"
+	prefix, r := lsp.ExportCompletionPrefixAndRange(text, 4, 8)
+	if prefix != "" {
+		t.Errorf("prefix: got %q, want empty", prefix)
+	}
+	if r.Start.Character != 8 {
+		t.Errorf("range start char: got %d, want 8", r.Start.Character)
+	}
+}
+
+func TestCompletion_ReturnsItems(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+		"openssl.yaml": `package: openssl
+slices:
+  bins:
+    contents:
+      /usr/bin/openssl:
+`,
+	})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+	srv := lsp.NewWithIndex(idx)
+
+	// Line 4, col 13: cursor mid-word "      - libc6" → prefix = "libc6"
+	items := srv.ExportCompletion(fooPath, completionText, 4, 13)
+	if len(items) == 0 {
+		t.Fatal("expected completion items, got none")
+	}
+
+	labels := make(map[string]bool)
+	for _, it := range items {
+		labels[it.Label] = true
+	}
+	if !labels["libc6_libs"] {
+		t.Errorf("expected libc6_libs in completions; got: %v", items)
+	}
+	if labels["openssl_bins"] {
+		t.Errorf("openssl_bins should be filtered out by prefix 'libc6'; got: %v", items)
+	}
+}
+
+func TestCompletion_AllItemsWhenNoPrefix(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+		"openssl.yaml": `package: openssl
+slices:
+  bins:
+    contents:
+      /usr/bin/openssl:
+`,
+	})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+	srv := lsp.NewWithIndex(idx)
+
+	// Cursor at "      - " (after the space, col 8) — no prefix, all items offered.
+	text := "package: foo\nslices:\n  bins:\n    essential:\n      - \n    contents:\n      /usr/bin/foo:\n"
+	items := srv.ExportCompletion(fooPath, text, 4, 8)
+	if len(items) < 2 {
+		t.Fatalf("expected at least 2 items with empty prefix, got %d: %v", len(items), items)
+	}
+}
+
+func TestCompletion_NilOutsideEssential(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+	})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+	srv := lsp.NewWithIndex(idx)
+
+	// Line 5 (contents:) is not inside essential.
+	items := srv.ExportCompletion(fooPath, completionText, 5, 5)
+	if items != nil {
+		t.Errorf("expected nil outside essential block, got %v", items)
+	}
+}
+
+func TestCompletion_TextEditReplacesOnlyValue(t *testing.T) {
+	// Verify that each completion item carries a TextEdit whose range starts
+	// AFTER the "- " marker so the dash is never clobbered by the editor.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+	})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+	srv := lsp.NewWithIndex(idx)
+
+	// Cursor at col 13 (within "libc6_libs"), line 4.
+	items := srv.ExportCompletion(fooPath, completionText, 4, 13)
+	if len(items) == 0 {
+		t.Fatal("no completion items")
+	}
+	for _, it := range items {
+		te, ok := it.TextEdit.(protocol.TextEdit)
+		if !ok {
+			t.Errorf("item %q: TextEdit is not a protocol.TextEdit (got %T)", it.Label, it.TextEdit)
+			continue
+		}
+		// Range must start at or after column 8 (right after "- ").
+		if te.Range.Start.Character < 8 {
+			t.Errorf("item %q: TextEdit range start col %d < 8 (would clobber '- ')",
+				it.Label, te.Range.Start.Character)
+		}
+		if te.NewText != it.Label {
+			t.Errorf("item %q: TextEdit NewText %q != Label", it.Label, te.NewText)
+		}
+	}
+}
+
+func TestCompletion_TopLevelEssential(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+	})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+	srv := lsp.NewWithIndex(idx)
+
+	// Top-level essential: line 2 is "  - libc6_libs"
+	text := "package: foo\nessential:\n  - libc6\nslices:\n  bins:\n    contents:\n      /usr/bin/foo:\n"
+	// cursor at col 9 (within "libc6")
+	items := srv.ExportCompletion(fooPath, text, 2, 9)
+	if len(items) == 0 {
+		t.Fatal("expected items for top-level essential, got none")
+	}
+	found := false
+	for _, it := range items {
+		if it.Label == "libc6_libs" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("libc6_libs not in top-level essential completions: %v", items)
+	}
+}
+
 func TestRenderSliceMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	slicesDir := filepath.Join(dir, "slices")
