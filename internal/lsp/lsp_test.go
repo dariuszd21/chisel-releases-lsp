@@ -1639,3 +1639,193 @@ t.Errorf("expected duplicate-slice diagnostic in %s, got: %v", filepath.Base(f),
 }
 }
 }
+
+// --- v3 bug reproduction tests ---
+
+// TestIsInsideEssential_V3_EmptyLine tests that an empty line inside a v3
+// essential block is recognised (so the user can get completions when they
+// press <CR> after the last existing entry and haven't typed anything yet).
+func TestIsInsideEssential_V3_EmptyLine(t *testing.T) {
+text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_libs:\n      \n    contents:\n      /usr/bin/foo:\n"
+// Line 5 is "      " (spaces only) — inside the essential block.
+if !lsp.ExportIsInsideEssential(text, 5) {
+t.Error("expected isInsideEssential=true for blank line inside v3 essential block")
+}
+}
+
+// TestIsInsideEssential_V3_PartialNoUnderscore tests that a partial token
+// without "_" yet (e.g. the user has typed "libc6" and not yet "_libs") is
+// still recognised as inside the essential block.
+func TestIsInsideEssential_V3_PartialNoUnderscore(t *testing.T) {
+text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6\n    contents:\n      /usr/bin/foo:\n"
+// Line 4: "      libc6" — partial v3 key, no underscore yet.
+if !lsp.ExportIsInsideEssential(text, 4) {
+t.Error("expected isInsideEssential=true for partial token without '_'")
+}
+}
+
+// TestIsInsideEssential_V3_CommentInBlock tests that YAML comment lines inside
+// a v3 essential block are treated as transparent, not as block terminators.
+// Real chisel-releases files (e.g. ubuntu-26.04/libc6.yaml) have comments
+// between entries in the essential map.
+func TestIsInsideEssential_V3_CommentInBlock(t *testing.T) {
+text := "package: foo\nslices:\n  libs:\n    essential:\n      # some comment\n      base-files_lib:\n    contents:\n      /usr/bin/foo:\n"
+// Line 5: "      base-files_lib:" — valid v3 key, but comment is above it.
+if !lsp.ExportIsInsideEssential(text, 5) {
+t.Error("expected isInsideEssential=true for v3 key below a comment line in essential block")
+}
+}
+
+// TestCompletionPrefixAndRange_V3_EmptyLine tests that an empty line inside a
+// v3 essential block produces a valid (zero-prefix, appendColon) result so the
+// caller can offer all slice refs.
+func TestCompletionPrefixAndRange_V3_EmptyLine(t *testing.T) {
+text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_libs:\n      \n    contents:\n      /usr/bin/foo:\n"
+// Line 5 is "      " (6 spaces), cursor at col 6 — right where typing starts.
+prefix, r, needsSpace, appendColon := lsp.ExportCompletionPrefixAndRange(text, 5, 6)
+if prefix != "" {
+t.Errorf("prefix: got %q, want empty string for blank line", prefix)
+}
+if needsSpace {
+t.Error("needsLeadingSpace should be false for v3 context")
+}
+if !appendColon {
+t.Error("appendColon should be true for v3 map-key context")
+}
+if r.Start.Character != 6 {
+t.Errorf("editRange start: got %d, want 6", r.Start.Character)
+}
+}
+
+// TestCompletion_V3_EmptyLine is the end-to-end test: an empty line inside a
+// v3 essential block must produce completion items.
+func TestCompletion_V3_EmptyLine(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+"base-files.yaml": `package: base-files
+slices:
+  base:
+    essential:
+      libc6_libs:
+    contents:
+      /etc/:
+`,
+})
+srv := lsp.NewWithIndex(idx)
+basePath := filepath.Join(slicesDir, "base-files.yaml")
+// Doc with an empty line after the existing v3 essential entry.
+text := "package: base-files\nslices:\n  base:\n    essential:\n      libc6_libs:\n      \n    contents:\n      /etc/:\n"
+// Cursor at col 6 on the blank line (line 5).
+items := srv.ExportCompletion(basePath, text, 5, 6)
+if len(items) == 0 {
+t.Fatal("expected completion items for blank line inside v3 essential block, got none")
+}
+}
+
+// TestCompletion_V3_CommentInBlock ensures completions work when there is a
+// YAML comment between the essential: header and the current entry — matching
+// real ubuntu-26.04 files like libc6.yaml.
+func TestCompletion_V3_CommentInBlock(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+"base-files.yaml": `package: base-files
+slices:
+  lib:
+    contents:
+      /lib/:
+`,
+})
+srv := lsp.NewWithIndex(idx)
+libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+// A v3 file with a YAML comment inside the essential block.
+text := "package: libc6\nslices:\n  gconv-core:\n    essential:\n      # explicit dependency\n      base-files_lib:\n    contents:\n      /usr/lib/*-linux-*/gconv/ANSI_X3.110.so:\n"
+// Cursor on "      base-files_lib:" (line 5) — after the comment.
+items := srv.ExportCompletion(libc6Path, text, 5, 20)
+if len(items) == 0 {
+t.Fatal("expected completion items for v3 entry below a comment line, got none")
+}
+}
+
+// TestReferences_V3_FromEssentialKey verifies that find-references works when
+// the cursor is on a v3-style map key (e.g. "libc6_libs:") in the essential block.
+// Cursor lands on the colon position to test the edge case.
+func TestReferences_V3_FromEssentialKey(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+"openssl.yaml": `package: openssl
+slices:
+  bins:
+    essential:
+      libc6_libs:
+    contents:
+      /usr/bin/openssl:
+`,
+})
+opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+srv := lsp.NewWithIndex(idx)
+
+// Line 4 of openssl.yaml: "      libc6_libs:"
+// Cursor at col 15 — on the "s" before the colon (last char of the word).
+locs, err := srv.ExportReferences(opensslPath, 4, 15)
+if err != nil {
+t.Fatal(err)
+}
+// Expect at least the definition location (fallback) or a real reference.
+if len(locs) == 0 {
+t.Fatal("expected at least 1 location from v3 essential key, got none")
+}
+}
+
+// TestReferences_V3_DefinitionSite verifies that find-references from the
+// definition key (e.g. "libs:" in slices: section) finds v3-format references.
+func TestReferences_V3_DefinitionSite(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+"openssl.yaml": `package: openssl
+slices:
+  bins:
+    essential:
+      libc6_libs:
+    contents:
+      /usr/bin/openssl:
+`,
+})
+libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+srv := lsp.NewWithIndex(idx)
+
+// Line 2 of libc6.yaml: "  libs:" — cursor on "libs"
+locs, err := srv.ExportReferences(libc6Path, 2, 3)
+if err != nil {
+t.Fatal(err)
+}
+// Must find the reference in openssl.yaml's v3 essential block.
+foundRef := false
+for _, loc := range locs {
+if strings.Contains(string(loc.URI), "openssl.yaml") {
+foundRef = true
+}
+}
+if !foundRef {
+t.Errorf("expected reference in openssl.yaml (v3 essential), got: %v", locs)
+}
+}

@@ -112,31 +112,43 @@ func completionPrefixAndRange(text string, line, char int) (prefix string, editR
 		col = len(l)
 	}
 
-	// Locate the "- " marker to find where the value token begins.
-	afterDash := strings.Index(l[:col], "- ")
-	valueStart := -1
-	if afterDash >= 0 {
-		valueStart = afterDash + 2 // character right after "- "
-	} else if dashOnly := strings.Index(l[:col], "-"); dashOnly >= 0 {
-		// Trigger character fired on "-" before the space was typed.
-		// Edit range starts right after the "-"; caller must prepend " ".
-		valueStart = dashOnly + 1
-		needsLeadingSpace = true
-	} else {
-		// v3 map key: no "- " marker. The value starts at the first non-space
-		// character on the line. Completion items must include a trailing colon.
-		leadingSpaces := 0
-		for leadingSpaces < len(l) && (l[leadingSpaces] == ' ' || l[leadingSpaces] == '\t') {
-			leadingSpaces++
-		}
-		if leadingSpaces < col {
-			valueStart = leadingSpaces
-			appendColon = true
-		}
+	// Find the leading-whitespace length so we can locate the first content char.
+	leadingSpaces := 0
+	for leadingSpaces < len(l) && (l[leadingSpaces] == ' ' || l[leadingSpaces] == '\t') {
+		leadingSpaces++
 	}
 
-	if valueStart < 0 {
+	// Cursor is inside the indentation — nothing to complete.
+	if leadingSpaces > col {
 		return "", editRange, false, false
+	}
+
+	var valueStart int
+	// Classify the line by its first non-whitespace character.
+	// A single "-" at the start of indented content is the v1/v2 list-item marker.
+	// Any other first character (or an empty/whitespace-only line) is v3 map-key context.
+	if leadingSpaces < len(l) && l[leadingSpaces] == '-' {
+		// v1/v2 list item marker.
+		if leadingSpaces+1 < len(l) && l[leadingSpaces+1] == ' ' {
+			// "- " form: value starts two characters after the indent.
+			valueStart = leadingSpaces + 2
+		} else {
+			// Bare "-" trigger: the user typed "-" but not the space yet.
+			// The caller must prepend " " to produce valid YAML.
+			valueStart = leadingSpaces + 1
+			needsLeadingSpace = true
+		}
+	} else {
+		// v3 map key context (or empty/whitespace-only line): value starts at
+		// the first non-space position. Completion items must include a trailing colon.
+		valueStart = leadingSpaces
+		appendColon = true
+	}
+
+	// If valueStart is beyond the cursor the trigger fired before the value
+	// position; return a zero-width cursor edit with empty prefix.
+	if valueStart > col {
+		return "", editRange, needsLeadingSpace, appendColon
 	}
 
 	prefix = l[valueStart:col]

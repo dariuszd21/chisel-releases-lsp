@@ -137,15 +137,34 @@ func isInsideEssential(text string, lineIdx int) bool {
 		return false
 	}
 	trimmed := strings.TrimSpace(lines[lineIdx])
-	// Line must look like an essential entry: list item (v1/v2) or map key (v3).
+
+	// Classify the current line:
+	//   - List item (v1/v2): starts with "- " or is bare "-"
+	//   - Map entry (v3): contains "_" before any ":" (pkg_slice or partial like "libc6_")
+	//   - Partial entry: blank line or a word in progress that hasn't reached "_" yet.
+	//     These are valid positions to offer completions when the backward scan
+	//     confirms we're inside an essential: block.
+	//     Reject: lines starting with "#" (comments), lines that are YAML keys
+	//     without "_" (e.g. "contents:", "bins:"), lines starting with "-" that
+	//     are not list items.
 	isListItem := strings.HasPrefix(trimmed, "- ") || trimmed == "-"
 	isMapEntry := looksLikeEssentialMapEntry(trimmed)
-	if !isListItem && !isMapEntry {
+	isPartialEntry := !strings.HasPrefix(trimmed, "-") &&
+		!strings.HasPrefix(trimmed, "#") &&
+		!strings.Contains(trimmed, ":")
+
+	if !isListItem && !isMapEntry && !isPartialEntry {
 		return false
 	}
+
 	for i := lineIdx - 1; i >= 0; i-- {
 		t := strings.TrimSpace(lines[i])
 		if t == "" {
+			continue
+		}
+		// Skip YAML comments — they can appear between entries in an essential
+		// block in real chisel-releases files (e.g. ubuntu-26.04/libc6.yaml).
+		if strings.HasPrefix(t, "#") {
 			continue
 		}
 		// Continue scanning past other essential entries of either format.

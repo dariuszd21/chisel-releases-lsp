@@ -108,7 +108,7 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 				Save:      &protocol.SaveOptions{IncludeText: &trueVal},
 			},
 			CompletionProvider: &protocol.CompletionOptions{
-				TriggerCharacters: []string{"-"},
+				TriggerCharacters: []string{"-", "_"},
 			},
 			DefinitionProvider:         &trueVal,
 			HoverProvider:              &trueVal,
