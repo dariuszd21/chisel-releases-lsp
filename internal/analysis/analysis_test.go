@@ -127,7 +127,7 @@ slices:
 	os.WriteFile(filepath.Join(slicesDir, "pkga.yaml"), []byte(a), 0644)
 	os.WriteFile(filepath.Join(slicesDir, "pkgb.yaml"), []byte(b), 0644)
 
-	idx, err := index.New(dir, nil)
+	idx, err := index.New(dir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,12 +12,23 @@ import (
 
 // publishDiagnosticsForFile computes and sends diagnostics for a single file.
 func (s *Server) publishDiagnosticsForFile(ctx *glsp.Context, filePath string) {
-	if s.idx == nil {
+	s.storeNotify(ctx)
+	diags := s.computeDiagnostics(filePath)
+	if diags == nil {
 		return
+	}
+	publishDiagnostics(ctx, filePathToURI(filePath), diags)
+}
+
+// computeDiagnostics returns the full diagnostic list for filePath.
+// Returns nil (not an empty slice) when the file is not indexed.
+func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
+	if s.idx == nil {
+		return nil
 	}
 	sf := s.idx.FileSliceFile(filePath)
 	if sf == nil {
-		return
+		return nil
 	}
 
 	var diags []protocol.Diagnostic
@@ -74,7 +85,7 @@ func (s *Server) publishDiagnosticsForFile(ctx *glsp.Context, filePath string) {
 		}
 	}
 
-	publishDiagnostics(ctx, filePathToURI(filePath), diags)
+	return diags
 }
 
 // collectEssentialRefs gathers all essential refs from a SliceFile (top-level + per-slice).

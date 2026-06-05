@@ -31,17 +31,21 @@ type Index struct {
 	// files maps absolute file path → *parser.SliceFile
 	files   map[string]*parser.SliceFile
 	watcher *fsnotify.Watcher
-	// onChange is called after any re-index with the affected file path.
+	// onChange is called (on a goroutine) after a file is created or updated.
 	onChange func(filePath string)
+	// onDelete is called (on a goroutine) after a file is removed from the index.
+	onDelete func(filePath string)
 }
 
 // New creates an Index for the given release root (directory containing `slices/`).
-// onChange, if non-nil, is invoked (on a goroutine) after each file re-index.
-func New(releaseRoot string, onChange func(filePath string)) (*Index, error) {
+// onChange is invoked after each file create/update; onDelete after each removal.
+// Either callback may be nil.
+func New(releaseRoot string, onChange func(filePath string), onDelete func(filePath string)) (*Index, error) {
 	idx := &Index{
 		slices:   make(map[string]map[string]*IndexedSlice),
 		files:    make(map[string]*parser.SliceFile),
 		onChange: onChange,
+		onDelete: onDelete,
 	}
 
 	slicesDir := filepath.Join(releaseRoot, "slices")
@@ -210,13 +214,16 @@ func (idx *Index) watchLoop(slicesDir string) {
 			switch {
 			case event.Has(fsnotify.Create) || event.Has(fsnotify.Write):
 				_ = idx.IndexFile(event.Name)
+				if idx.onChange != nil {
+					go idx.onChange(event.Name)
+				}
 			case event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename):
 				idx.mu.Lock()
 				idx.removeFile(event.Name)
 				idx.mu.Unlock()
-			}
-			if idx.onChange != nil {
-				go idx.onChange(event.Name)
+				if idx.onDelete != nil {
+					go idx.onDelete(event.Name)
+				}
 			}
 		case _, ok := <-idx.watcher.Errors:
 			if !ok {

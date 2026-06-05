@@ -51,7 +51,7 @@ func TestIndexLoad(t *testing.T) {
 		"libc6.yaml":   libc6,
 	})
 
-	idx, err := index.New(dir, nil)
+	idx, err := index.New(dir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestIndexLoad(t *testing.T) {
 func TestIndexWatch(t *testing.T) {
 	dir := writeRelease(t, map[string]string{"openssl.yaml": openssl})
 	changed := make(chan string, 1)
-	idx, err := index.New(dir, func(p string) { changed <- p })
+	idx, err := index.New(dir, func(p string) { changed <- p }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

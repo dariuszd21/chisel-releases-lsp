@@ -27,6 +27,12 @@ type Server struct {
 	// docMu / docs holds the latest text of open documents (keyed by file path).
 	docMu sync.RWMutex
 	docs  map[string]string
+
+	// notifyMu guards notify; notify is set from the first request context and
+	// used by background goroutines that must send LSP notifications without a
+	// request-scoped context.
+	notifyMu sync.Mutex
+	notify   func(method string, params any)
 }
 
 // New creates a Server.
@@ -67,9 +73,13 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "chisel-releases-lsp: bad root URI %q: %v\n", s.rootURI, err)
 	} else {
-		idx, idxErr := index.New(root, func(filePath string) {
-			s.publishDiagnosticsForFile(ctx, filePath)
-		})
+		// Store the notifier from this ctx before spawning the index so that
+		// background callbacks never capture a stale request-scoped context.
+		s.storeNotify(ctx)
+		idx, idxErr := index.New(root,
+			func(filePath string) { s.publishDiagnosticsBackground(filePath) },
+			func(filePath string) { s.clearDiagnosticsBackground(filePath) },
+		)
 		if idxErr != nil {
 			fmt.Fprintf(os.Stderr, "chisel-releases-lsp: index error: %v\n", idxErr)
 		} else {
@@ -197,5 +207,53 @@ func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidClo
 	// Clear diagnostics so the client doesn't show stale squiggles.
 	publishDiagnostics(ctx, params.TextDocument.URI, []protocol.Diagnostic{})
 	return nil
+}
+
+// storeNotify caches a notification sender from ctx for use by background goroutines.
+func (s *Server) storeNotify(ctx *glsp.Context) {
+	s.notifyMu.Lock()
+	defer s.notifyMu.Unlock()
+	if s.notify == nil {
+		s.notify = ctx.Notify
+	}
+}
+
+// publishDiagnosticsBackground recomputes and sends diagnostics for filePath
+// without requiring a request-scoped context. Used by the file watcher.
+func (s *Server) publishDiagnosticsBackground(filePath string) {
+	if s.idx == nil {
+		return
+	}
+	sf := s.idx.FileSliceFile(filePath)
+	if sf == nil {
+		return
+	}
+	s.notifyMu.Lock()
+	notify := s.notify
+	s.notifyMu.Unlock()
+	if notify == nil {
+		return
+	}
+	// Re-use the same diagnostics logic via a nil-context helper.
+	diags := s.computeDiagnostics(filePath)
+	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+		URI:         filePathToURI(filePath),
+		Diagnostics: diags,
+	})
+}
+
+// clearDiagnosticsBackground sends an empty diagnostic list for filePath,
+// clearing any squiggles the client may be showing for a deleted file.
+func (s *Server) clearDiagnosticsBackground(filePath string) {
+	s.notifyMu.Lock()
+	notify := s.notify
+	s.notifyMu.Unlock()
+	if notify == nil {
+		return
+	}
+	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+		URI:         filePathToURI(filePath),
+		Diagnostics: []protocol.Diagnostic{},
+	})
 }
 

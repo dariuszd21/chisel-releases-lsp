@@ -80,7 +80,7 @@ slices:
       /lib/x86_64-linux-gnu/libc.so.6:
 `), 0644)
 
-	idx, err := index.New(dir, nil)
+	idx, err := index.New(dir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
