@@ -12,6 +12,8 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 |---------|-----------|
 | **Slice completions** — suggest `<pkg>_<slice>` in `essential:` lists | `textDocument/completion` |
 | **Jump to definition** — go to the slice key in its `.yaml` file | `textDocument/definition` |
+| **Document symbols** — outline view showing the package and all its slices | `textDocument/documentSymbol` |
+| **Workspace symbols** — search all `pkg_slice` names across the release | `workspace/symbol` |
 | **Glob pattern validation** — flag invalid patterns in `contents:` | `textDocument/publishDiagnostics` |
 | **Slice collision detection** — warn when two packages claim the same path | `textDocument/publishDiagnostics` |
 | **Unknown reference warnings** — warn on `essential:` entries that don't exist | `textDocument/publishDiagnostics` |
@@ -75,6 +77,8 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
 
 - **Completions** are offered whenever the cursor is inside an `essential:` list item.
 - **Go to definition** resolves `<pkg>_<slice>` tokens to the exact line in `slices/<pkg>.yaml`.
+- **Document symbols** (`Ctrl+Shift+O` in most editors) shows a package/slice outline for the current file.
+- **Workspace symbols** (`Ctrl+T` / `@` in most editors) lets you fuzzy-search any `pkg_slice` name across the entire release.
 - **Diagnostics** are published on open, change, and save:
   - Invalid glob patterns in `contents:` paths.
   - Cross-package path collisions (two packages claiming the same concrete path).
@@ -137,6 +141,7 @@ internal/
 ## Known Limitations
 
 - **Character offsets use byte lengths, not UTF-16 code units.** The LSP specification requires character positions to be expressed in UTF-16 code units by default. `chisel-releases-lsp` currently uses byte lengths (`len(token)`). For ASCII-only package and slice names this makes no difference, but names containing multi-byte UTF-8 characters would produce off-by-one position errors in some editors.
+- **`workspace/symbol` returns at most a few hundred items.** There is no pagination; for very large chisel-releases trees with hundreds of packages this could be slow. In practice canonical/chisel-releases has ~100 packages so this is not a problem today.
 
 ---
 
