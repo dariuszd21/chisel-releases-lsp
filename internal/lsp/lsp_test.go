@@ -157,6 +157,11 @@ func TestFilePathToURI(t *testing.T) {
 	if strings.HasPrefix(string(rel), "file://") {
 		t.Errorf("relative path should not get file:// prefix, got %q", rel)
 	}
+	// Paths with spaces must be percent-encoded.
+	got2 := lsp.ExportFilePathToURI("/usr/share/my project/foo.yaml")
+	if !strings.Contains(string(got2), "%20") {
+		t.Errorf("space not percent-encoded in URI: %q", got2)
+	}
 }
 
 func TestToProtocolRange(t *testing.T) {

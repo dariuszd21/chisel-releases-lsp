@@ -22,12 +22,13 @@ func uriToPath(uri string) (string, error) {
 	return u.Path, nil
 }
 
-// filePathToURI converts an OS path to a file:// URI.
+// filePathToURI converts an OS path to a file:// URI (RFC 3986-encoded).
 func filePathToURI(p string) protocol.DocumentUri {
 	if !strings.HasPrefix(p, "/") {
 		return protocol.DocumentUri(p)
 	}
-	return protocol.DocumentUri("file://" + p)
+	u := &url.URL{Scheme: "file", Path: p}
+	return protocol.DocumentUri(u.String())
 }
 
 // toProtocolRange converts a parser.Range to a protocol.Range.
