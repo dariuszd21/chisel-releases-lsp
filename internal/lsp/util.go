@@ -53,6 +53,7 @@ const (
 	DiagCodeSliceCollision      = "slice-collision"
 	DiagCodeInvalidSliceRef     = "invalid-slice-ref"
 	DiagCodeUnknownSliceRef     = "unknown-slice-ref"
+	DiagCodeDuplicateSlice      = "duplicate-slice"
 )
 
 // diagCodePtr wraps a diagnostic code string into the protocol's IntegerOrString type.

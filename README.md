@@ -22,6 +22,7 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 | **Unknown reference warnings** — warn on `essential:` entries that don't exist | `textDocument/publishDiagnostics` |
 | **Package name check** — warn when `package:` value doesn't match the filename stem | `textDocument/publishDiagnostics` |
 | **Hover documentation** — show a slice's contents and essential dependencies | `textDocument/hover` |
+| **Duplicate slice detection** — warn when the same `pkg_slice` is defined in more than one file | `textDocument/publishDiagnostics` |
 
 ---
 

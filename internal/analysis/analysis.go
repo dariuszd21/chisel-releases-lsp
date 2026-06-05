@@ -191,3 +191,57 @@ func DetectCollisions(idx *index.Index) []Collision {
 func isGlob(p string) bool {
 	return strings.ContainsAny(p, "*?[")
 }
+
+// DuplicateSlice describes two files that both define the same package+slice name.
+// The second definition silently overwrites the first in the index, so the user
+// may see inconsistent hover/reference results without realising why.
+type DuplicateSlice struct {
+	Pkg       string
+	SliceName string
+	File1     string       // file that defined the slice first (alphabetically)
+	Range1    parser.Range // NameRange of the slice key in File1
+	File2     string       // second definition
+	Range2    parser.Range
+}
+
+// DetectDuplicateSlices finds all (package, sliceName) pairs that are defined
+// in more than one file. Results are sorted by Pkg then SliceName for determinism.
+func DetectDuplicateSlices(idx *index.Index) []DuplicateSlice {
+	type entry struct {
+		file  string
+		rng   parser.Range
+	}
+	// (pkg+":"+sliceName) → first entry seen
+	seen := make(map[string]entry)
+
+	var dups []DuplicateSlice
+	for _, filePath := range idx.AllFiles() {
+		sf := idx.FileSliceFile(filePath)
+		if sf == nil || sf.Package == "" {
+			continue
+		}
+		for _, sliceName := range sf.SliceOrder {
+			sd := sf.Slices[sliceName]
+			key := sf.Package + ":" + sliceName
+			if prev, exists := seen[key]; exists {
+				dups = append(dups, DuplicateSlice{
+					Pkg:       sf.Package,
+					SliceName: sliceName,
+					File1:     prev.file,
+					Range1:    prev.rng,
+					File2:     filePath,
+					Range2:    sd.NameRange,
+				})
+			} else {
+				seen[key] = entry{filePath, sd.NameRange}
+			}
+		}
+	}
+	sort.Slice(dups, func(i, j int) bool {
+		if dups[i].Pkg != dups[j].Pkg {
+			return dups[i].Pkg < dups[j].Pkg
+		}
+		return dups[i].SliceName < dups[j].SliceName
+	})
+	return dups
+}

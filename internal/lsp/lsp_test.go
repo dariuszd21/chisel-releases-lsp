@@ -1602,3 +1602,40 @@ slices:
 		}
 	}
 }
+
+func TestComputeDiagnostics_DuplicateSlice(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"openssl.yaml": `package: openssl
+slices:
+  bins:
+    contents:
+      /usr/bin/openssl:
+`,
+"openssl-extra.yaml": `package: openssl
+slices:
+  bins:
+    contents:
+      /usr/bin/c_rehash:
+`,
+})
+srv := lsp.NewWithIndex(idx)
+
+file1 := filepath.Join(slicesDir, "openssl.yaml")
+file2 := filepath.Join(slicesDir, "openssl-extra.yaml")
+
+// Both files should each get a duplicate-slice warning.
+for _, f := range []string{file1, file2} {
+diags := lsp.ExportComputeDiagnostics(srv, f)
+found := false
+for _, d := range diags {
+if d.Code != nil {
+	if code, ok := d.Code.Value.(string); ok && code == "duplicate-slice" {
+found = true
+}
+}
+}
+if !found {
+t.Errorf("expected duplicate-slice diagnostic in %s, got: %v", filepath.Base(f), diags)
+}
+}
+}

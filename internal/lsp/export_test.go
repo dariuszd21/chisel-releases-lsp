@@ -153,3 +153,8 @@ func (s *Server) ExportCompletion(filePath, text string, line, char int) []proto
 func ExportCompletionPrefixAndRange(text string, line, char int) (string, protocol.Range, bool, bool) {
 	return completionPrefixAndRange(text, line, char)
 }
+
+// ExportComputeDiagnostics exposes computeDiagnostics for testing.
+func ExportComputeDiagnostics(s *Server, filePath string) []protocol.Diagnostic {
+return s.computeDiagnostics(filePath)
+}

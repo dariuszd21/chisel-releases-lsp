@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"fmt"
+	"path/filepath"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
@@ -95,6 +96,30 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 				Source:   strPtr("chisel-releases-lsp"),
 				Code:     diagCodePtr(DiagCodeUnknownSliceRef),
 				Message:  fmt.Sprintf("unknown slice reference %q", ref.Value),
+			})
+		}
+	}
+
+	// 5. Duplicate slice definitions: same pkg+name declared in two files.
+	for _, dup := range analysis.DetectDuplicateSlices(s.idx) {
+		if dup.File1 == filePath {
+			diags = append(diags, protocol.Diagnostic{
+				Range:    toProtocolRange(dup.Range1),
+				Severity: severityPtr(protocol.DiagnosticSeverityWarning),
+				Source:   strPtr("chisel-releases-lsp"),
+				Code:     diagCodePtr(DiagCodeDuplicateSlice),
+				Message: fmt.Sprintf("slice %q_%q is also defined in %s",
+					dup.Pkg, dup.SliceName, filepath.Base(dup.File2)),
+			})
+		}
+		if dup.File2 == filePath {
+			diags = append(diags, protocol.Diagnostic{
+				Range:    toProtocolRange(dup.Range2),
+				Severity: severityPtr(protocol.DiagnosticSeverityWarning),
+				Source:   strPtr("chisel-releases-lsp"),
+				Code:     diagCodePtr(DiagCodeDuplicateSlice),
+				Message: fmt.Sprintf("slice %q_%q is also defined in %s",
+					dup.Pkg, dup.SliceName, filepath.Base(dup.File1)),
 			})
 		}
 	}
