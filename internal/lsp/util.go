@@ -113,14 +113,33 @@ func isWordChar(b byte) bool {
 		(b >= '0' && b <= '9') || b == '_' || b == '-' || b == '.'
 }
 
-// isInsideEssential reports whether the given line is inside an essential: list.
+// looksLikeEssentialMapEntry reports whether a trimmed line looks like a v3
+// essential map entry: a key that contains "_" (the pkg_slice separator) before
+// the first colon, which distinguishes it from section headers like "contents:".
+//
+// Handles both complete entries ("libc6_libs:") and partially-typed tokens
+// ("libc6_" — no colon yet while the user is typing).
+func looksLikeEssentialMapEntry(trimmed string) bool {
+	colonIdx := strings.IndexByte(trimmed, ':')
+	key := trimmed
+	if colonIdx > 0 {
+		key = trimmed[:colonIdx]
+	}
+	return strings.Contains(key, "_") && !strings.HasPrefix(key, "-")
+}
+
+// isInsideEssential reports whether the given line is inside an essential: list
+// (v1/v2 sequence format) or map (v3 mapping format).
 func isInsideEssential(text string, lineIdx int) bool {
 	lines := strings.Split(text, "\n")
 	if lineIdx >= len(lines) {
 		return false
 	}
 	trimmed := strings.TrimSpace(lines[lineIdx])
-	if !strings.HasPrefix(trimmed, "- ") && trimmed != "-" {
+	// Line must look like an essential entry: list item (v1/v2) or map key (v3).
+	isListItem := strings.HasPrefix(trimmed, "- ") || trimmed == "-"
+	isMapEntry := looksLikeEssentialMapEntry(trimmed)
+	if !isListItem && !isMapEntry {
 		return false
 	}
 	for i := lineIdx - 1; i >= 0; i-- {
@@ -128,10 +147,14 @@ func isInsideEssential(text string, lineIdx int) bool {
 		if t == "" {
 			continue
 		}
+		// Continue scanning past other essential entries of either format.
 		if strings.HasPrefix(t, "- ") {
 			continue
 		}
-		return strings.HasPrefix(t, "essential:")
+		if looksLikeEssentialMapEntry(t) {
+			continue
+		}
+		return strings.HasPrefix(t, "essential:") || strings.HasPrefix(t, "v3-essential:")
 	}
 	return false
 }

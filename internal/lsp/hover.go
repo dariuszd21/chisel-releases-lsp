@@ -60,6 +60,9 @@ func (s *Server) textDocumentHover(_ *glsp.Context, params *protocol.HoverParams
 func renderSliceMarkdown(pkg, sliceName string, sd *parser.SliceDef) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("### `%s_%s`\n\n", pkg, sliceName))
+	if sd.Hint != "" {
+		sb.WriteString(fmt.Sprintf("_%s_\n\n", sd.Hint))
+	}
 	if len(sd.Essential) > 0 {
 		sb.WriteString("**Essential:**\n")
 		for _, e := range sd.Essential {

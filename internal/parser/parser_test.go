@@ -163,3 +163,131 @@ func TestSliceRefFromToken(t *testing.T) {
 		}
 	}
 }
+
+// --- Format v3 and back-compat tests ---
+
+const v3YAML = `package: base-files
+
+essential:
+  base-files_copyright:
+
+slices:
+  base:
+    hint: "Base filesystem hierarchy"
+    essential:
+      base-files_bin:
+      base-files_etc: {arch: amd64}
+    contents:
+      /etc/:
+`
+
+func TestParseBytes_V3MapEssential(t *testing.T) {
+sf, err := parser.ParseBytes([]byte(v3YAML))
+if err != nil {
+t.Fatalf("ParseBytes v3: %v", err)
+}
+
+if sf.Package != "base-files" {
+t.Errorf("package: got %q", sf.Package)
+}
+
+// Package-level essential: map with 1 key.
+if len(sf.Essential) != 1 || sf.Essential[0].Value != "base-files_copyright" {
+t.Errorf("top-level essential: %v", sf.Essential)
+}
+
+base := sf.Slices["base"]
+if base == nil {
+t.Fatal("base slice not found")
+}
+
+// Hint field.
+if base.Hint != "Base filesystem hierarchy" {
+t.Errorf("hint: got %q, want %q", base.Hint, "Base filesystem hierarchy")
+}
+
+// Slice-level essential: 2 map entries (arch value on second is ignored).
+if len(base.Essential) != 2 {
+t.Fatalf("base essential count: got %d, want 2", len(base.Essential))
+}
+vals := map[string]bool{}
+for _, e := range base.Essential {
+vals[e.Value] = true
+}
+if !vals["base-files_bin"] || !vals["base-files_etc"] {
+t.Errorf("unexpected essential values: %v", base.Essential)
+}
+}
+
+func TestParseBytes_V3EssentialRange(t *testing.T) {
+// Verify that ValueRange for a v3 map key points at the key token, not the colon.
+// v3YAML line 3 (0-based) is "  base-files_copyright:" — key at col 2.
+sf, err := parser.ParseBytes([]byte(v3YAML))
+if err != nil {
+t.Fatal(err)
+}
+ref := sf.Essential[0]
+if ref.ValueRange.Start.Line != 3 {
+t.Errorf("top-level essential ref line: got %d, want 3", ref.ValueRange.Start.Line)
+}
+if ref.ValueRange.Start.Character != 2 {
+t.Errorf("top-level essential ref col: got %d, want 2", ref.ValueRange.Start.Character)
+}
+// End should cover the full token "base-files_copyright" (20 chars).
+wantEnd := ref.ValueRange.Start.Character + len("base-files_copyright")
+if ref.ValueRange.End.Character != wantEnd {
+t.Errorf("top-level essential ref end col: got %d, want %d", ref.ValueRange.End.Character, wantEnd)
+}
+}
+
+const v3EssentialBackCompatYAML = `package: mypkg
+
+essential:
+  - mypkg_slice4
+
+v3-essential:
+  mypkg_slice4: {arch: [amd64, i386]}
+
+slices:
+  myslice1:
+    essential:
+      - mypkg_slice2
+    v3-essential:
+      mypkg_slice3: {arch: arm64}
+    contents:
+      /usr/bin/mybin:
+`
+
+func TestParseBytes_V3EssentialBackCompat(t *testing.T) {
+sf, err := parser.ParseBytes([]byte(v3EssentialBackCompatYAML))
+if err != nil {
+t.Fatalf("ParseBytes back-compat: %v", err)
+}
+
+// Package-level: essential list + v3-essential map merged.
+// Both "mypkg_slice4" entries are included (one from each field).
+if len(sf.Essential) != 2 {
+t.Fatalf("package-level essential count: got %d, want 2", len(sf.Essential))
+}
+for _, e := range sf.Essential {
+if e.Value != "mypkg_slice4" {
+t.Errorf("unexpected package essential value: %q", e.Value)
+}
+}
+
+myslice := sf.Slices["myslice1"]
+if myslice == nil {
+t.Fatal("myslice1 not found")
+}
+// Slice-level: essential list + v3-essential map merged.
+if len(myslice.Essential) != 2 {
+t.Fatalf("slice essential count: got %d, want 2", len(myslice.Essential))
+}
+vals := map[string]bool{}
+for _, e := range myslice.Essential {
+vals[e.Value] = true
+}
+if !vals["mypkg_slice2"] || !vals["mypkg_slice3"] {
+t.Errorf("unexpected slice essential values: %v", myslice.Essential)
+}
+}

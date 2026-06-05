@@ -31,10 +31,11 @@ type ContentEntry struct {
 
 // SliceDef represents a single named slice inside a package.
 type SliceDef struct {
-	Name       string
-	NameRange  Range
-	Essential  []EssentialRef
-	Contents   []ContentEntry
+	Name      string
+	NameRange Range
+	Hint      string // optional short description (v3+)
+	Essential []EssentialRef
+	Contents  []ContentEntry
 }
 
 // EssentialRef is a reference to another slice (pkg_slice) inside an essential list.
@@ -106,12 +107,12 @@ func parseSliceFile(mapping *yaml.Node) (*SliceFile, error) {
 		case "package":
 			sf.Package = val.Value
 			sf.PackageRange = nodeRange(val)
-		case "essential":
+		case "essential", "v3-essential":
 			refs, err := parseEssentialList(val)
 			if err != nil {
 				return nil, err
 			}
-			sf.Essential = refs
+			sf.Essential = append(sf.Essential, refs...)
 		case "slices":
 			if val.Kind != yaml.MappingNode {
 				return nil, fmt.Errorf("slices must be a mapping")
@@ -142,12 +143,14 @@ func parseSliceDef(name string, nameRange Range, body *yaml.Node) (*SliceDef, er
 		key := pairs[i]
 		val := pairs[i+1]
 		switch key.Value {
-		case "essential":
+		case "hint":
+			sd.Hint = val.Value
+		case "essential", "v3-essential":
 			refs, err := parseEssentialList(val)
 			if err != nil {
 				return nil, err
 			}
-			sd.Essential = refs
+			sd.Essential = append(sd.Essential, refs...)
 		case "contents":
 			entries, err := parseContents(val)
 			if err != nil {
@@ -159,16 +162,37 @@ func parseSliceDef(name string, nameRange Range, body *yaml.Node) (*SliceDef, er
 	return sd, nil
 }
 
+// parseEssentialList parses an essential: block in either v1/v2 (YAML sequence)
+// or v3 (YAML mapping) format.
+//
+// v1/v2 list:       v3 map:
+//   - pkg_slice       pkg_slice:
+//                     pkg_slice: {arch: amd64}
+//
+// Arch constraints in v3 map values are silently ignored — the LSP indexes all
+// refs regardless of architecture so completion and references work on any target.
 func parseEssentialList(node *yaml.Node) ([]EssentialRef, error) {
-	if node.Kind != yaml.SequenceNode {
-		return nil, nil
-	}
 	var refs []EssentialRef
-	for _, item := range node.Content {
-		refs = append(refs, EssentialRef{
-			Value:      item.Value,
-			ValueRange: nodeRange(item),
-		})
+	switch node.Kind {
+	case yaml.SequenceNode:
+		// v1/v2: list syntax "- pkg_slice"
+		for _, item := range node.Content {
+			refs = append(refs, EssentialRef{
+				Value:      item.Value,
+				ValueRange: nodeRange(item),
+			})
+		}
+	case yaml.MappingNode:
+		// v3: map syntax "pkg_slice:" or "pkg_slice: {arch: amd64}"
+		// Also handles v3-essential: back-compat field in v1/v2 files.
+		pairs := node.Content
+		for i := 0; i+1 < len(pairs); i += 2 {
+			key := pairs[i]
+			refs = append(refs, EssentialRef{
+				Value:      key.Value,
+				ValueRange: nodeRange(key),
+			})
+		}
 	}
 	return refs, nil
 }

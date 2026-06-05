@@ -87,6 +87,30 @@ func TestIsInsideEssential_TopLevel(t *testing.T) {
 	}
 }
 
+func TestIsInsideEssential_V3MapKey(t *testing.T) {
+	v3Text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_libs:\n      openssl_bins:\n    contents:\n      /usr/bin/foo:\n"
+	// Line 4: "      libc6_libs:" — inside essential (v3 map)
+	if !lsp.ExportIsInsideEssential(v3Text, 4) {
+		t.Error("expected isInsideEssential=true for v3 map key line 4")
+	}
+	// Line 5: "      openssl_bins:" — inside essential (v3 map)
+	if !lsp.ExportIsInsideEssential(v3Text, 5) {
+		t.Error("expected isInsideEssential=true for v3 map key line 5")
+	}
+	// Line 6: "    contents:" — NOT inside essential
+	if lsp.ExportIsInsideEssential(v3Text, 6) {
+		t.Error("expected isInsideEssential=false for contents: line")
+	}
+}
+
+func TestIsInsideEssential_V3PartialKey(t *testing.T) {
+	// "libc6_" (partial, no colon yet) should still be detected as inside essential.
+	v3Text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_\n    contents:\n      /usr/bin/foo:\n"
+	if !lsp.ExportIsInsideEssential(v3Text, 4) {
+		t.Error("expected isInsideEssential=true for partial v3 map key")
+	}
+}
+
 // --- textDocument/completion ---
 
 // completionText is the document content used by completion tests.
@@ -109,7 +133,7 @@ slices:
 
 func TestCompletionPrefixAndRange_WithPrefix(t *testing.T) {
 	// Cursor at "libc6" (partial) on line 4, char 13 — after "      - libc6"
-	prefix, r, needsSpace := lsp.ExportCompletionPrefixAndRange(completionText, 4, 13)
+	prefix, r, needsSpace, appendColon := lsp.ExportCompletionPrefixAndRange(completionText, 4, 13)
 	if prefix != "libc6" {
 		t.Errorf("prefix: got %q, want %q", prefix, "libc6")
 	}
@@ -123,12 +147,15 @@ func TestCompletionPrefixAndRange_WithPrefix(t *testing.T) {
 	if needsSpace {
 		t.Error("needsLeadingSpace should be false when '- ' marker present")
 	}
+	if appendColon {
+		t.Error("appendColon should be false for v1/v2 list context")
+	}
 }
 
 func TestCompletionPrefixAndRange_TriggerOnly(t *testing.T) {
 	// Cursor right after "-" on a fresh line: "      -" (col 7), no space yet.
 	text := "package: foo\nslices:\n  bins:\n    essential:\n      -\n    contents:\n      /usr/bin/foo:\n"
-	prefix, r, needsSpace := lsp.ExportCompletionPrefixAndRange(text, 4, 7)
+	prefix, r, needsSpace, appendColon := lsp.ExportCompletionPrefixAndRange(text, 4, 7)
 	if prefix != "" {
 		t.Errorf("prefix: got %q, want empty", prefix)
 	}
@@ -141,12 +168,15 @@ func TestCompletionPrefixAndRange_TriggerOnly(t *testing.T) {
 	if !needsSpace {
 		t.Error("needsLeadingSpace should be true in trigger-only mode")
 	}
+	if appendColon {
+		t.Error("appendColon should be false in trigger-only mode")
+	}
 }
 
 func TestCompletionPrefixAndRange_AfterSpace(t *testing.T) {
 	// Cursor at "      - " (col 8, right after the space), nothing typed yet.
 	text := "package: foo\nslices:\n  bins:\n    essential:\n      - \n    contents:\n      /usr/bin/foo:\n"
-	prefix, r, needsSpace := lsp.ExportCompletionPrefixAndRange(text, 4, 8)
+	prefix, r, needsSpace, appendColon := lsp.ExportCompletionPrefixAndRange(text, 4, 8)
 	if prefix != "" {
 		t.Errorf("prefix: got %q, want empty", prefix)
 	}
@@ -155,6 +185,41 @@ func TestCompletionPrefixAndRange_AfterSpace(t *testing.T) {
 	}
 	if needsSpace {
 		t.Error("needsLeadingSpace should be false after the space is typed")
+	}
+	if appendColon {
+		t.Error("appendColon should be false for v1/v2 context")
+	}
+}
+
+func TestCompletionPrefixAndRange_V3MapKey(t *testing.T) {
+	// v3 map key line: "      libc6_" (no dash), cursor at col 12.
+	text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_\n    contents:\n      /usr/bin/foo:\n"
+	prefix, r, needsSpace, appendColon := lsp.ExportCompletionPrefixAndRange(text, 4, 12)
+	if prefix != "libc6_" {
+		t.Errorf("prefix: got %q, want %q", prefix, "libc6_")
+	}
+	// Range start should be at col 6 (first non-space on the line).
+	if r.Start.Character != 6 {
+		t.Errorf("range start char: got %d, want 6", r.Start.Character)
+	}
+	if needsSpace {
+		t.Error("needsLeadingSpace should be false for v3 map key")
+	}
+	if !appendColon {
+		t.Error("appendColon should be true for v3 map key context")
+	}
+}
+
+func TestCompletionPrefixAndRange_V3MapKeyWithExistingColon(t *testing.T) {
+	// v3 map key line with existing colon: "      libc6_libs:" cursor at col 16 (after "libs").
+	text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_libs:\n    contents:\n      /usr/bin/foo:\n"
+	_, r, _, appendColon := lsp.ExportCompletionPrefixAndRange(text, 4, 16)
+	// Range end should include the colon (col 17: 6 spaces + 10 chars "libc6_libs" + 1 colon).
+	if r.End.Character != 17 {
+		t.Errorf("range end with colon: got %d, want 17", r.End.Character)
+	}
+	if !appendColon {
+		t.Error("appendColon should be true for v3 map key with colon")
 	}
 }
 
@@ -921,6 +986,85 @@ slices:
 	// First must be the definition (libc6.yaml).
 	if locs[0].URI != lsp.ExportFilePathToURI(libc6Path) {
 		t.Errorf("first location should be definition (libc6.yaml), got %s", locs[0].URI)
+	}
+}
+
+// --- format v3 integration tests ---
+
+func TestCompletion_V3EssentialFormat(t *testing.T) {
+	// A file using v3 map-style essential should still produce completion items
+	// for references defined in other indexed files.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+		"base-files.yaml": `package: base-files
+slices:
+  base:
+    essential:
+      libc6_libs:
+    contents:
+      /etc/:
+`,
+	})
+	basePath := filepath.Join(slicesDir, "base-files.yaml")
+	srv := lsp.NewWithIndex(idx)
+
+	// v3 map-style doc; cursor on line 4 "      libc6_" (col 12, mid-token)
+	text := "package: base-files\nslices:\n  base:\n    essential:\n      libc6_\n    contents:\n      /etc/:\n"
+	items := srv.ExportCompletion(basePath, text, 4, 12)
+	if len(items) == 0 {
+		t.Fatal("expected completion items for v3-format file, got none")
+	}
+	found := false
+	for _, it := range items {
+		if it.Label == "libc6_libs" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("libc6_libs not in completions for v3-format file: %v", items)
+	}
+}
+
+func TestReferences_V3EssentialFormat(t *testing.T) {
+	// A v3 map-style essential entry must be indexed and findable via references.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+		"base-files.yaml": `package: base-files
+slices:
+  base:
+    essential:
+      libc6_libs:
+    contents:
+      /etc/:
+`,
+	})
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	srv := lsp.NewWithIndex(idx)
+
+	// Cursor on "libs:" definition in libc6.yaml (line 2).
+	locs, err := srv.ExportReferences(libc6Path, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expect the reference from base-files.yaml (v3 map entry).
+	foundRef := false
+	for _, loc := range locs {
+		if strings.Contains(string(loc.URI), "base-files.yaml") {
+			foundRef = true
+		}
+	}
+	if !foundRef {
+		t.Errorf("expected a reference from base-files.yaml (v3 map essential), got: %v", locs)
 	}
 }
 

@@ -42,7 +42,7 @@ func (s *Server) computeCompletion(text string, uri protocol.DocumentUri, line, 
 	}
 
 	// Compute the prefix typed after "- " and the replacement range.
-	prefix, editRange, needsLeadingSpace := completionPrefixAndRange(text, line, char)
+	prefix, editRange, needsLeadingSpace, appendColon := completionPrefixAndRange(text, line, char)
 
 	var items []protocol.CompletionItem
 	kind := protocol.CompletionItemKindReference
@@ -54,6 +54,10 @@ func (s *Server) computeCompletion(text string, uri protocol.DocumentUri, line, 
 				// Trigger fired on bare "-" (no space typed yet). Insert a
 				// space before the ref so the result is valid YAML: "- ref".
 				newText = " " + ref
+			} else if appendColon {
+				// v3 map key context: the ref must be followed by ":" to
+				// produce a valid YAML mapping key: "pkg_slice:".
+				newText = ref + ":"
 			}
 			items = append(items, protocol.CompletionItem{
 				Label: ref,
@@ -73,27 +77,34 @@ func (s *Server) computeCompletion(text string, uri protocol.DocumentUri, line, 
 
 // completionPrefixAndRange returns the text already typed after the "- " list
 // marker (used to filter candidates), the edit range that should be replaced
-// when a completion item is accepted, and whether a leading space must be
-// prepended to the NewText (true when the trigger fired on bare "-" with no
-// space typed yet).
+// when a completion item is accepted, whether a leading space must be prepended
+// to NewText, and whether a trailing colon must be appended (v3 map key context).
 //
-// For a line like "      - libc6" with cursor at column 14:
+// For a v1/v2 line like "      - libc6" with cursor at column 14:
 //   - prefix          = "libc6"
-//   - editRange       = {line, 8} → {line, 14}   (replaces "libc6" only)
+//   - editRange       = {line, 8} → {line, 14}
 //   - needsLeadingSpace = false
+//   - appendColon      = false
 //
-// For a trigger on "      -" (no space yet, cursor at column 7):
+// For a v1/v2 trigger on "      -" (no space yet, cursor at column 7):
 //   - prefix          = ""
-//   - editRange       = {line, 7} → {line, 7}   (zero-width insert after "-")
-//   - needsLeadingSpace = true   (caller must use " "+ref as NewText)
-func completionPrefixAndRange(text string, line, char int) (prefix string, editRange protocol.Range, needsLeadingSpace bool) {
+//   - editRange       = {line, 7} → {line, 7}
+//   - needsLeadingSpace = true
+//   - appendColon      = false
+//
+// For a v3 map key line "      libc6_" (cursor at column 12):
+//   - prefix          = "libc6_"
+//   - editRange       = {line, 6} → {line, 12}  (extended to cover any existing ":")
+//   - needsLeadingSpace = false
+//   - appendColon      = true  (caller must use ref+":" as NewText)
+func completionPrefixAndRange(text string, line, char int) (prefix string, editRange protocol.Range, needsLeadingSpace, appendColon bool) {
 	lines := strings.Split(text, "\n")
 	// Default: zero-width insert at cursor.
 	pos := protocol.Position{Line: uint32(line), Character: uint32(char)}
 	editRange = protocol.Range{Start: pos, End: pos}
 
 	if line >= len(lines) {
-		return "", editRange, false
+		return "", editRange, false, false
 	}
 	l := lines[line]
 	col := char
@@ -111,10 +122,21 @@ func completionPrefixAndRange(text string, line, char int) (prefix string, editR
 		// Edit range starts right after the "-"; caller must prepend " ".
 		valueStart = dashOnly + 1
 		needsLeadingSpace = true
+	} else {
+		// v3 map key: no "- " marker. The value starts at the first non-space
+		// character on the line. Completion items must include a trailing colon.
+		leadingSpaces := 0
+		for leadingSpaces < len(l) && (l[leadingSpaces] == ' ' || l[leadingSpaces] == '\t') {
+			leadingSpaces++
+		}
+		if leadingSpaces < col {
+			valueStart = leadingSpaces
+			appendColon = true
+		}
 	}
 
 	if valueStart < 0 {
-		return "", editRange, false
+		return "", editRange, false, false
 	}
 
 	prefix = l[valueStart:col]
@@ -125,10 +147,15 @@ func completionPrefixAndRange(text string, line, char int) (prefix string, editR
 	for wordEnd < len(l) && isWordChar(l[wordEnd]) {
 		wordEnd++
 	}
+	// For v3 map keys, also consume an existing trailing colon so the
+	// replacement doesn't produce a double colon ("libc6_libs::").
+	if appendColon && wordEnd < len(l) && l[wordEnd] == ':' {
+		wordEnd++
+	}
 
 	editRange = protocol.Range{
 		Start: protocol.Position{Line: uint32(line), Character: uint32(valueStart)},
 		End:   protocol.Position{Line: uint32(line), Character: uint32(wordEnd)},
 	}
-	return prefix, editRange, needsLeadingSpace
+	return prefix, editRange, needsLeadingSpace, appendColon
 }
