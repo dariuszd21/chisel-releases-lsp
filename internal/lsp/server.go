@@ -250,6 +250,9 @@ func (s *Server) publishDiagnosticsBackground(filePath string) {
 		URI:         filePathToURI(filePath),
 		Diagnostics: diags,
 	})
+	// Republish all other open files: cross-file analysis (collision detection)
+	// may produce different results for them after this file changed.
+	s.republishOpenFiles(notify, filePath)
 }
 
 // clearDiagnosticsBackground sends an empty diagnostic list for filePath,
@@ -265,5 +268,31 @@ func (s *Server) clearDiagnosticsBackground(filePath string) {
 		URI:         filePathToURI(filePath),
 		Diagnostics: []protocol.Diagnostic{},
 	})
+	// Republish all other open files: a deleted file may have resolved collisions.
+	s.republishOpenFiles(notify, filePath)
+}
+
+// republishOpenFiles recomputes and pushes diagnostics for every document
+// currently open in the editor, skipping skipPath (already handled by the caller).
+func (s *Server) republishOpenFiles(notify func(string, any), skipPath string) {
+	s.docMu.RLock()
+	open := make([]string, 0, len(s.docs))
+	for f := range s.docs {
+		if f != skipPath {
+			open = append(open, f)
+		}
+	}
+	s.docMu.RUnlock()
+
+	for _, f := range open {
+		diags := s.computeDiagnostics(f)
+		if diags == nil {
+			continue
+		}
+		notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+			URI:         filePathToURI(f),
+			Diagnostics: diags,
+		})
+	}
 }
 
