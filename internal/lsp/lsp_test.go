@@ -583,3 +583,137 @@ if locs == nil || len(locs) != 0 {
 t.Errorf("expected empty locations, got %v", locs)
 }
 }
+
+// --- textDocument/rename ---
+
+func TestRename_FromEssentialRef(t *testing.T) {
+// openssl.yaml has "- libc6_libs". Rename libc6_libs → libc6_shared_libs
+// from that essential entry. The definition in libc6.yaml and the reference
+// in openssl.yaml should both be updated.
+libc6Content := `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`
+opensslContent := `package: openssl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml":   libc6Content,
+"openssl.yaml": opensslContent,
+})
+
+libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+
+srv := lsp.NewWithIndex(idx)
+srv.SetDocForTest(opensslPath, opensslContent)
+
+// Line 4 (0-based) in openssl.yaml is "      - libc6_libs"
+edit, err := srv.ExportRename(opensslPath, 4, 10, "libc6_shared_libs")
+if err != nil {
+t.Fatal(err)
+}
+if edit == nil {
+t.Fatal("expected non-nil WorkspaceEdit")
+}
+
+libc6URI := lsp.ExportFilePathToURI(libc6Path)
+opensslURI := lsp.ExportFilePathToURI(opensslPath)
+
+defEdits := edit.Changes[libc6URI]
+if len(defEdits) != 1 {
+t.Errorf("expected 1 edit in libc6.yaml (definition), got %d", len(defEdits))
+} else if defEdits[0].NewText != "shared_libs" {
+t.Errorf("definition edit NewText: got %q, want %q", defEdits[0].NewText, "shared_libs")
+}
+
+refEdits := edit.Changes[opensslURI]
+if len(refEdits) != 1 {
+t.Errorf("expected 1 edit in openssl.yaml (reference), got %d", len(refEdits))
+} else if refEdits[0].NewText != "libc6_shared_libs" {
+t.Errorf("reference edit NewText: got %q, want %q", refEdits[0].NewText, "libc6_shared_libs")
+}
+}
+
+func TestRename_FromDefinition_BareNewName(t *testing.T) {
+// Cursor on the "libs:" definition key; user types bare "shared_libs".
+libc6Content := `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`
+opensslContent := `package: openssl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml":   libc6Content,
+"openssl.yaml": opensslContent,
+})
+
+libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+
+srv := lsp.NewWithIndex(idx)
+// Line 2 (0-based) in libc6.yaml is "  libs:"
+edit, err := srv.ExportRename(libc6Path, 2, 3, "shared_libs")
+if err != nil {
+t.Fatal(err)
+}
+if edit == nil {
+t.Fatal("expected non-nil WorkspaceEdit")
+}
+
+libc6URI := lsp.ExportFilePathToURI(libc6Path)
+opensslURI := lsp.ExportFilePathToURI(filepath.Join(slicesDir, "openssl.yaml"))
+
+defEdits := edit.Changes[libc6URI]
+if len(defEdits) != 1 || defEdits[0].NewText != "shared_libs" {
+t.Errorf("definition: got %+v, want NewText=shared_libs", defEdits)
+}
+
+refEdits := edit.Changes[opensslURI]
+if len(refEdits) != 1 || refEdits[0].NewText != "libc6_shared_libs" {
+t.Errorf("reference: got %+v, want NewText=libc6_shared_libs", refEdits)
+}
+}
+
+func TestRename_NewNameWithoutPackagePrefix(t *testing.T) {
+// New name "openssl_libs" has no "libc6_" prefix, so it is used as-is
+// as the bare slice name, resulting in definition = "openssl_libs" and
+// essential refs = "libc6_openssl_libs".
+content := `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`
+idx, slicesDir := setupLSPIndex(t, map[string]string{"libc6.yaml": content})
+
+srv := lsp.NewWithIndex(idx)
+libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+// Line 2 is "  libs:" — cursor on definition
+edit, err := srv.ExportRename(libc6Path, 2, 3, "openssl_libs")
+if err != nil {
+t.Fatal(err)
+}
+if edit == nil {
+t.Fatal("expected non-nil WorkspaceEdit")
+}
+libc6URI := lsp.ExportFilePathToURI(libc6Path)
+defEdits := edit.Changes[libc6URI]
+if len(defEdits) != 1 || defEdits[0].NewText != "openssl_libs" {
+t.Errorf("definition: got %+v, want NewText=openssl_libs", defEdits)
+}
+}

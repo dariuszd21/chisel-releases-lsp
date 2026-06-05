@@ -54,6 +54,8 @@ func New() *Server {
 		TextDocumentReferences: s.textDocumentReferences,
 		TextDocumentDocumentSymbol: s.textDocumentDocumentSymbol,
 		WorkspaceSymbol:            s.workspaceSymbol,
+		TextDocumentRename:         s.textDocumentRename,
+		TextDocumentPrepareRename:  s.textDocumentPrepareRename,
 	}
 	return s
 }
@@ -108,6 +110,7 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 			ReferencesProvider:         &trueVal,
 			DocumentSymbolProvider:     &trueVal,
 			WorkspaceSymbolProvider:    &trueVal,
+			RenameProvider:             &trueVal,
 		},
 		ServerInfo: &protocol.InitializeResultServerInfo{
 			Name:    lsName,

@@ -105,3 +105,15 @@ func (s *Server) ExportReferences(filePath string, line, char int) ([]protocol.L
 func (s *Server) SetDocForTest(filePath, text string) {
 	s.setDoc(filePath, text)
 }
+
+// ExportRename calls textDocumentRename with the given params.
+func (s *Server) ExportRename(filePath string, line, char int, newName string) (*protocol.WorkspaceEdit, error) {
+	uri := filePathToURI(filePath)
+	return s.textDocumentRename(nil, &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: uint32(line), Character: uint32(char)},
+		},
+		NewName: newName,
+	})
+}
