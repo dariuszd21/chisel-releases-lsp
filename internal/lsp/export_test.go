@@ -101,7 +101,20 @@ func (s *Server) ExportReferences(filePath string, line, char int) ([]protocol.L
 	})
 }
 
-// SetDocForTest injects document text into the server's docs map, simulating an open document.
+// ExportReindexAndPublish exposes reindexAndPublish for testing.
+func (s *Server) ExportReindexAndPublish(n Notifier, filePath string, content []byte) {
+	s.reindexAndPublish(n, filePath, content)
+}
+
+// ExportPublishDiagnosticsForFile exposes publishDiagnosticsForFile for testing.
+func (s *Server) ExportPublishDiagnosticsForFile(n Notifier, filePath string) {
+	s.publishDiagnosticsForFile(n, filePath)
+}
+
+// ExportRepublishOpenFiles exposes republishOpenFiles for testing.
+func (s *Server) ExportRepublishOpenFiles(n Notifier, skipPath string) {
+	s.republishOpenFiles(n, skipPath)
+}
 func (s *Server) SetDocForTest(filePath, text string) {
 	s.setDoc(filePath, text)
 }

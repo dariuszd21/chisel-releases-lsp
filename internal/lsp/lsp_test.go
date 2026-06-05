@@ -717,3 +717,193 @@ if len(defEdits) != 1 || defEdits[0].NewText != "openssl_libs" {
 t.Errorf("definition: got %+v, want NewText=openssl_libs", defEdits)
 }
 }
+
+// --- recordingNotifier test helper ---
+
+type recordingNotifier struct {
+calls []notifyCall
+}
+
+type notifyCall struct {
+method string
+params any
+}
+
+func (r *recordingNotifier) Notify(method string, params any) {
+r.calls = append(r.calls, notifyCall{method, params})
+}
+
+func (r *recordingNotifier) diagParams() []protocol.PublishDiagnosticsParams {
+var out []protocol.PublishDiagnosticsParams
+for _, c := range r.calls {
+if c.method == "textDocument/publishDiagnostics" {
+if p, ok := c.params.(protocol.PublishDiagnosticsParams); ok {
+out = append(out, p)
+}
+}
+}
+return out
+}
+
+// --- reindexAndPublish tests ---
+
+func TestReindexAndPublish_ParseError(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+})
+
+srv := lsp.NewWithIndex(idx)
+n := &recordingNotifier{}
+badContent := []byte("package: libc6\nslices: [\ninvalid yaml")
+srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), badContent)
+
+params := n.diagParams()
+if len(params) != 1 {
+t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
+}
+if len(params[0].Diagnostics) == 0 {
+t.Fatal("expected at least one diagnostic for parse error")
+}
+if !strings.Contains(params[0].Diagnostics[0].Message, "YAML parse error") {
+t.Errorf("expected parse error message, got %q", params[0].Diagnostics[0].Message)
+}
+}
+
+func TestReindexAndPublish_CleanFile(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+})
+
+srv := lsp.NewWithIndex(idx)
+n := &recordingNotifier{}
+cleanContent := []byte(`package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`)
+srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), cleanContent)
+
+params := n.diagParams()
+if len(params) != 1 {
+t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
+}
+if len(params[0].Diagnostics) != 0 {
+t.Errorf("expected empty diagnostics for clean file, got %v", params[0].Diagnostics)
+}
+}
+
+func TestReindexAndPublish_GlobError(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+})
+
+srv := lsp.NewWithIndex(idx)
+n := &recordingNotifier{}
+// relative path is invalid
+contentWithBadGlob := []byte(`package: libc6
+slices:
+  libs:
+    contents:
+      relative/path:
+`)
+srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), contentWithBadGlob)
+
+params := n.diagParams()
+if len(params) != 1 || len(params[0].Diagnostics) == 0 {
+t.Fatalf("expected diagnostics for bad glob, got params=%v", params)
+}
+if !strings.Contains(params[0].Diagnostics[0].Message, "absolute") {
+t.Errorf("expected 'absolute' in diagnostic, got %q", params[0].Diagnostics[0].Message)
+}
+}
+
+func TestPublishDiagnosticsForFile_WithIssues(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    essential:
+      - nonexistent_slice
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+})
+
+srv := lsp.NewWithIndex(idx)
+n := &recordingNotifier{}
+srv.ExportPublishDiagnosticsForFile(n, filepath.Join(slicesDir, "libc6.yaml"))
+
+params := n.diagParams()
+if len(params) != 1 {
+t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
+}
+found := false
+for _, d := range params[0].Diagnostics {
+if strings.Contains(d.Message, "unknown slice reference") {
+found = true
+}
+}
+if !found {
+t.Errorf("expected 'unknown slice reference' diagnostic, got %v", params[0].Diagnostics)
+}
+}
+
+func TestRepublishOpenFiles_SendsDiagsForOpenDocs(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+"openssl.yaml": `package: openssl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`,
+})
+
+opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+srv := lsp.NewWithIndex(idx)
+// Mark openssl.yaml as open.
+srv.SetDocForTest(opensslPath, `package: openssl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`)
+
+n := &recordingNotifier{}
+// skipPath = libc6.yaml; only openssl.yaml (open) should get republished.
+libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+srv.ExportRepublishOpenFiles(n, libc6Path)
+
+params := n.diagParams()
+if len(params) != 1 {
+t.Fatalf("expected 1 republish notification (for openssl.yaml), got %d", len(params))
+}
+if params[0].URI != lsp.ExportFilePathToURI(opensslPath) {
+t.Errorf("expected openssl.yaml URI, got %s", params[0].URI)
+}
+}
