@@ -38,7 +38,7 @@ func (s *Server) textDocumentHover(_ *glsp.Context, params *protocol.HoverParams
 		return nil, nil
 	}
 
-	pkg, sliceName := splitSliceRef(token)
+	pkg, sliceName := parser.SliceRefFromToken(token)
 	if pkg == "" {
 		return nil, nil
 	}

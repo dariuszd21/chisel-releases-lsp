@@ -55,11 +55,6 @@ func publishDiagnostics(ctx *glsp.Context, uri protocol.DocumentUri, diags []pro
 	})
 }
 
-// parseBytes is a thin wrapper around parser.ParseBytes for use inside the lsp package.
-func parseBytes(data []byte) (*parser.SliceFile, error) {
-	return parser.ParseBytes(data)
-}
-
 // wordAtPosition returns the word token under the given position in text.
 func wordAtPosition(text string, line, char int) string {
 	lines := strings.Split(text, "\n")

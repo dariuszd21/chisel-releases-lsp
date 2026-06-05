@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -55,7 +54,7 @@ func (s *Server) publishDiagnosticsForFile(ctx *glsp.Context, filePath string) {
 
 	// 3. Validate essential references exist in the index.
 	for _, ref := range collectEssentialRefs(sf) {
-		pkg, slice := splitSliceRef(ref.Value)
+		pkg, slice := parser.SliceRefFromToken(ref.Value)
 		if pkg == "" {
 			diags = append(diags, protocol.Diagnostic{
 				Range:    toProtocolRange(ref.ValueRange),
@@ -85,13 +84,5 @@ func collectEssentialRefs(sf *parser.SliceFile) []parser.EssentialRef {
 		refs = append(refs, sd.Essential...)
 	}
 	return refs
-}
-
-func splitSliceRef(s string) (pkg, slice string) {
-	idx := strings.LastIndex(s, "_")
-	if idx <= 0 || idx == len(s)-1 {
-		return "", ""
-	}
-	return s[:idx], s[idx+1:]
 }
 

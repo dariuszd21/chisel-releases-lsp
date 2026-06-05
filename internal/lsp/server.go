@@ -12,6 +12,7 @@ import (
 	glspserver "github.com/tliron/glsp/server"
 
 	"github.com/canonical/chisel-releases-lsp/internal/index"
+	"github.com/canonical/chisel-releases-lsp/internal/parser"
 )
 
 const lsName = "chisel-releases-lsp"
@@ -155,7 +156,7 @@ func (s *Server) reindexAndPublish(ctx *glsp.Context, filePath string, content [
 	if s.idx == nil {
 		return
 	}
-	sf, err := parseBytes(content)
+	sf, err := parser.ParseBytes(content)
 	if err != nil {
 		publishDiagnostics(ctx, filePathToURI(filePath), []protocol.Diagnostic{
 			{
