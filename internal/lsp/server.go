@@ -41,6 +41,7 @@ func New() *Server {
 		TextDocumentDidOpen:    s.textDocumentDidOpen,
 		TextDocumentDidChange:  s.textDocumentDidChange,
 		TextDocumentDidSave:    s.textDocumentDidSave,
+		TextDocumentDidClose:   s.textDocumentDidClose,
 		TextDocumentCompletion: s.textDocumentCompletion,
 		TextDocumentDefinition: s.textDocumentDefinition,
 		TextDocumentHover:      s.textDocumentHover,
@@ -183,5 +184,18 @@ func (s *Server) getDoc(filePath string) (string, bool) {
 	defer s.docMu.RUnlock()
 	t, ok := s.docs[filePath]
 	return t, ok
+}
+
+func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
+	filePath, err := uriToPath(string(params.TextDocument.URI))
+	if err != nil {
+		return nil
+	}
+	s.docMu.Lock()
+	delete(s.docs, filePath)
+	s.docMu.Unlock()
+	// Clear diagnostics so the client doesn't show stale squiggles.
+	publishDiagnostics(ctx, params.TextDocument.URI, []protocol.Diagnostic{})
+	return nil
 }
 
