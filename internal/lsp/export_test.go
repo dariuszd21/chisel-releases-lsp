@@ -79,6 +79,8 @@ func (s *Server) ExportRevertToDisk(filePath string) error {
 	}
 	return s.idx.IndexFile(filePath)
 }
+
+// ExportFilePathToURI exposes filePathToURI for testing.
 func ExportFilePathToURI(p string) protocol.DocumentUri {
 	return filePathToURI(p)
 }
@@ -86,4 +88,20 @@ func ExportFilePathToURI(p string) protocol.DocumentUri {
 // ExportToProtocolRange exposes toProtocolRange for testing.
 func ExportToProtocolRange(r parser.Range) protocol.Range {
 	return toProtocolRange(r)
+}
+
+// ExportReferences calls textDocumentReferences with the given file URI and position.
+func (s *Server) ExportReferences(filePath string, line, char int) ([]protocol.Location, error) {
+	uri := filePathToURI(filePath)
+	return s.textDocumentReferences(nil, &protocol.ReferenceParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: uint32(line), Character: uint32(char)},
+		},
+	})
+}
+
+// SetDocForTest injects document text into the server's docs map, simulating an open document.
+func (s *Server) SetDocForTest(filePath, text string) {
+	s.setDoc(filePath, text)
 }

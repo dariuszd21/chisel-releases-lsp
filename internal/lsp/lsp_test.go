@@ -478,3 +478,108 @@ if !found {
 t.Errorf("libc6_libs missing after revert, refs: %v", refs)
 }
 }
+
+// --- textDocument/references ---
+
+func TestReferences_FromEssentialEntry(t *testing.T) {
+// openssl.yaml has "- libc6_libs" at a known line.
+// Placing the cursor on that token should return a reference location.
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+"openssl.yaml": `package: openssl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`,
+"curl.yaml": `package: curl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+      - openssl_bins
+    contents:
+      /usr/bin/curl:
+`,
+})
+
+opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+// Line 4 (0-based) is "      - libc6_libs"
+srv := lsp.NewWithIndex(idx)
+srv.SetDocForTest(opensslPath, `package: openssl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`)
+locs, err := srv.ExportReferences(opensslPath, 4, 10)
+if err != nil {
+t.Fatal(err)
+}
+if len(locs) != 2 {
+t.Fatalf("expected 2 references to libc6_libs, got %d: %v", len(locs), locs)
+}
+}
+
+func TestReferences_FromSliceDefinition(t *testing.T) {
+// Placing the cursor on the "libs:" key in libc6.yaml should find references
+// to libc6_libs across all files.
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+"openssl.yaml": `package: openssl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`,
+})
+
+libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+// Line 2 (0-based) is "  libs:"
+srv := lsp.NewWithIndex(idx)
+locs, err := srv.ExportReferences(libc6Path, 2, 3)
+if err != nil {
+t.Fatal(err)
+}
+if len(locs) != 1 {
+t.Fatalf("expected 1 reference to libc6_libs from definition, got %d: %v", len(locs), locs)
+}
+}
+
+func TestReferences_NoResults(t *testing.T) {
+idx, slicesDir := setupLSPIndex(t, map[string]string{
+"libc6.yaml": `package: libc6
+slices:
+  copyright:
+    contents:
+      /usr/share/doc/libc6/copyright:
+`,
+})
+
+libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+srv := lsp.NewWithIndex(idx)
+// Line 2 is "  copyright:" — nobody references libc6_copyright
+locs, err := srv.ExportReferences(libc6Path, 2, 3)
+if err != nil {
+t.Fatal(err)
+}
+if locs == nil || len(locs) != 0 {
+t.Errorf("expected empty locations, got %v", locs)
+}
+}
