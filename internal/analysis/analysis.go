@@ -1,10 +1,13 @@
 // Package analysis provides static analysis passes over chisel slice definitions:
 //   - Glob pattern validation for contents: paths
 //   - Slice collision detection (same concrete path in different packages)
+//   - Package name ↔ filename consistency
 package analysis
 
 import (
+	"fmt"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -48,7 +51,29 @@ func ValidateGlobs(filePath string, sf *parser.SliceFile) []Diagnostic {
 	return diags
 }
 
-// validateGlobPath returns an error message if p is not a valid glob, or "".
+// CheckPackageName returns a diagnostic if the file's package: value does not
+// match the filename stem (e.g. "openssl.yaml" must declare package: openssl).
+// Returns nil when the file has no package name or the names match.
+func CheckPackageName(filePath string, sf *parser.SliceFile) *Diagnostic {
+	if sf.Package == "" {
+		return nil
+	}
+	stem := strings.TrimSuffix(filepath.Base(filePath), ".yaml")
+	if sf.Package == stem {
+		return nil
+	}
+	return &Diagnostic{
+		File:  filePath,
+		Range: sf.PackageRange,
+		Message: fmt.Sprintf(
+			"package name %q does not match filename %q (expected %q)",
+			sf.Package, filepath.Base(filePath), stem,
+		),
+		Severity: SeverityWarning,
+	}
+}
+
+
 // Chisel uses Go's path.Match-style globs but also allows **, so we normalise
 // ** → "*" for the stdlib check.
 func validateGlobPath(p string) string {

@@ -234,3 +234,58 @@ slices:
 		t.Errorf("expected no collisions for glob paths, got: %+v", collisions)
 	}
 }
+
+// --- CheckPackageName ---
+
+func mustParseYAML(t *testing.T, yaml string) *parser.SliceFile {
+	t.Helper()
+	sf, err := parser.ParseBytes([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sf
+}
+
+func TestCheckPackageName_Match(t *testing.T) {
+	sf := mustParseYAML(t, `package: openssl
+slices:
+  bins:
+    contents:
+      /usr/bin/openssl:
+`)
+	d := analysis.CheckPackageName("/releases/slices/openssl.yaml", sf)
+	if d != nil {
+		t.Errorf("expected no diagnostic for matching name, got: %v", d)
+	}
+}
+
+func TestCheckPackageName_Mismatch(t *testing.T) {
+	sf := mustParseYAML(t, `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`)
+	d := analysis.CheckPackageName("/releases/slices/openssl.yaml", sf)
+	if d == nil {
+		t.Fatal("expected diagnostic for mismatched package name, got nil")
+	}
+	if !strings.Contains(d.Message, "libc6") || !strings.Contains(d.Message, "openssl.yaml") {
+		t.Errorf("diagnostic message should mention both names, got: %q", d.Message)
+	}
+	if d.Severity != analysis.SeverityWarning {
+		t.Errorf("expected Warning severity, got %v", d.Severity)
+	}
+}
+
+func TestCheckPackageName_EmptyPackage(t *testing.T) {
+	sf := mustParseYAML(t, `slices:
+  bins:
+    contents:
+      /usr/bin/foo:
+`)
+	d := analysis.CheckPackageName("/releases/slices/foo.yaml", sf)
+	if d != nil {
+		t.Errorf("expected no diagnostic when package is empty, got: %v", d)
+	}
+}

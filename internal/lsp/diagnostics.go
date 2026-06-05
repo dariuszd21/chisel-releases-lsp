@@ -33,7 +33,17 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 
 	diags := []protocol.Diagnostic{}
 
-	// 1. Glob validation
+	// 1. Package name ↔ filename consistency
+	if d := analysis.CheckPackageName(filePath, sf); d != nil {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.Range),
+			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
+			Source:   strPtr("chisel-releases-lsp"),
+			Message:  d.Message,
+		})
+	}
+
+	// 2. Glob validation
 	for _, d := range analysis.ValidateGlobs(filePath, sf) {
 		diags = append(diags, protocol.Diagnostic{
 			Range:    toProtocolRange(d.Range),
@@ -43,7 +53,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		})
 	}
 
-	// 2. Slice collision detection (cross-file; report only entries in this file)
+	// 3. Slice collision detection (cross-file; report only entries in this file)
 	for _, col := range analysis.DetectCollisions(s.idx) {
 		if col.FileA == filePath {
 			diags = append(diags, protocol.Diagnostic{
@@ -63,7 +73,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		}
 	}
 
-	// 3. Validate essential references exist in the index.
+	// 4. Validate essential references exist in the index.
 	for _, ref := range collectEssentialRefs(sf) {
 		pkg, slice := parser.SliceRefFromToken(ref.Value)
 		if pkg == "" {
