@@ -157,8 +157,18 @@ func (s *Server) textDocumentDidSave(ctx *glsp.Context, params *protocol.DidSave
 		s.setDoc(filePath, *params.Text)
 		s.reindexAndPublish(ctx, filePath, []byte(*params.Text))
 	} else if s.idx != nil {
-		_ = s.idx.IndexFile(filePath)
-		s.publishDiagnosticsForFile(ctx, filePath)
+		if idxErr := s.idx.IndexFile(filePath); idxErr != nil {
+			publishDiagnostics(ctx, filePathToURI(filePath), []protocol.Diagnostic{
+				{
+					Range:    protocol.Range{},
+					Severity: severityPtr(protocol.DiagnosticSeverityError),
+					Source:   strPtr("chisel-releases-lsp"),
+					Message:  "YAML parse error: " + idxErr.Error(),
+				},
+			})
+		} else {
+			s.publishDiagnosticsForFile(ctx, filePath)
+		}
 	}
 	return nil
 }
