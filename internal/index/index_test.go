@@ -222,3 +222,24 @@ func parseYAML(t *testing.T, yaml string) *parser.SliceFile {
 	}
 	return sf
 }
+
+func TestAllFilesSorted(t *testing.T) {
+dir := writeRelease(t, map[string]string{
+"openssl.yaml": openssl,
+"libc6.yaml":   libc6,
+})
+
+idx, err := index.New(dir, nil, nil)
+if err != nil {
+t.Fatal(err)
+}
+defer idx.Close()
+
+files := idx.AllFiles()
+if !sort.StringsAreSorted(files) {
+t.Errorf("AllFiles() not sorted: %v", files)
+}
+if len(files) != 2 {
+t.Errorf("expected 2 files, got %d: %v", len(files), files)
+}
+}

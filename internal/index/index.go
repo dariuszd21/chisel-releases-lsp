@@ -100,7 +100,7 @@ func (idx *Index) AllSliceRefs() []string {
 	return refs
 }
 
-// AllFiles returns all currently indexed file paths.
+// AllFiles returns all currently indexed file paths in sorted order.
 func (idx *Index) AllFiles() []string {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
@@ -108,6 +108,7 @@ func (idx *Index) AllFiles() []string {
 	for p := range idx.files {
 		out = append(out, p)
 	}
+	sort.Strings(out)
 	return out
 }
 
