@@ -54,7 +54,7 @@ if not configs.chisel_releases_lsp then
     default_config = {
       cmd = { 'chisel-releases-lsp' },
       filetypes = { 'yaml' },
-      root_dir = lspconfig.util.root_pattern('chisel.yaml', 'slices'),
+      root_dir = lspconfig.util.root_pattern('chisel.yaml'),
       settings = {},
     },
   }
@@ -131,6 +131,12 @@ internal/
   analysis/                # Glob validation + collision detection
   lsp/                     # LSP method handlers (glsp)
 ```
+
+---
+
+## Known Limitations
+
+- **Character offsets use byte lengths, not UTF-16 code units.** The LSP specification requires character positions to be expressed in UTF-16 code units by default. `chisel-releases-lsp` currently uses byte lengths (`len(token)`). For ASCII-only package and slice names this makes no difference, but names containing multi-byte UTF-8 characters would produce off-by-one position errors in some editors.
 
 ---
 
