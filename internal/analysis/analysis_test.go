@@ -3,6 +3,7 @@ package analysis_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/canonical/chisel-releases-lsp/internal/analysis"
@@ -80,10 +81,8 @@ slices:
 		if c.wantErr && len(diags) > 0 && c.msgFrag != "" {
 			found := false
 			for _, d := range diags {
-				if len(d.Message) > 0 {
-					if contains(d.Message, c.msgFrag) {
-						found = true
-					}
+				if strings.Contains(d.Message, c.msgFrag) {
+					found = true
 				}
 			}
 			if !found {
@@ -93,45 +92,60 @@ slices:
 	}
 }
 
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
-		func() bool {
-			for i := 0; i+len(sub) <= len(s); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-			return false
-		}())
+func TestValidateGlobs_StarStarMidSegment(t *testing.T) {
+	yaml := `package: p
+slices:
+  s:
+    contents:
+      /foo**/bar:
+`
+	sf, err := parser.ParseBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := analysis.ValidateGlobs("test.yaml", sf)
+	if len(diags) == 0 {
+		t.Error("expected diagnostic for mid-segment **, got none")
+	}
+}
+
+func setupCollisionIndex(t *testing.T, files map[string]string) *index.Index {
+	t.Helper()
+	dir := t.TempDir()
+	slicesDir := filepath.Join(dir, "slices")
+	if err := os.Mkdir(slicesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(slicesDir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idx, err := index.New(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { idx.Close() })
+	return idx
 }
 
 func TestDetectCollisions(t *testing.T) {
-	dir := t.TempDir()
-	slicesDir := filepath.Join(dir, "slices")
-	os.Mkdir(slicesDir, 0755)
-
-	a := `package: pkga
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
 slices:
   s:
     contents:
       /shared/path:
       /only/a:
-`
-	b := `package: pkgb
+`,
+		"pkgb.yaml": `package: pkgb
 slices:
   s:
     contents:
       /shared/path:
       /only/b:
-`
-	os.WriteFile(filepath.Join(slicesDir, "pkga.yaml"), []byte(a), 0644)
-	os.WriteFile(filepath.Join(slicesDir, "pkgb.yaml"), []byte(b), 0644)
-
-	idx, err := index.New(dir, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer idx.Close()
+`,
+	})
 
 	collisions := analysis.DetectCollisions(idx)
 	if len(collisions) != 1 {
@@ -139,5 +153,48 @@ slices:
 	}
 	if collisions[0].Path != "/shared/path" {
 		t.Errorf("collision path: %q", collisions[0].Path)
+	}
+}
+
+func TestDetectCollisions_SamePackageNoCollision(t *testing.T) {
+	// Same path in two slices of the same package is allowed.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s1:
+    contents:
+      /shared/path:
+  s2:
+    contents:
+      /shared/path:
+`,
+	})
+
+	collisions := analysis.DetectCollisions(idx)
+	if len(collisions) != 0 {
+		t.Errorf("expected no collisions for same-package paths, got: %+v", collisions)
+	}
+}
+
+func TestDetectCollisions_GlobNotCollision(t *testing.T) {
+	// Glob paths must not trigger collision detection.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/bin/*:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/bin/*:
+`,
+	})
+
+	collisions := analysis.DetectCollisions(idx)
+	if len(collisions) != 0 {
+		t.Errorf("expected no collisions for glob paths, got: %+v", collisions)
 	}
 }
