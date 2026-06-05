@@ -218,8 +218,28 @@ func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidClo
 	s.docMu.Lock()
 	delete(s.docs, filePath)
 	s.docMu.Unlock()
-	// Clear diagnostics so the client doesn't show stale squiggles.
-	publishDiagnostics(ctx, params.TextDocument.URI, []protocol.Diagnostic{})
+
+	if s.idx == nil {
+		publishDiagnostics(ctx, params.TextDocument.URI, []protocol.Diagnostic{})
+		return nil
+	}
+
+	// Revert to on-disk state so cross-file analysis reflects saved content,
+	// not the unsaved in-memory buffer that was open in the editor.
+	if idxErr := s.idx.IndexFile(filePath); idxErr != nil {
+		// File is gone or broken on disk — clear its diagnostics.
+		publishDiagnostics(ctx, params.TextDocument.URI, []protocol.Diagnostic{})
+	} else {
+		// Publish the real on-disk diagnostics and update open peers (collision
+		// detection may now produce different results for them).
+		s.publishDiagnosticsForFile(ctx, filePath)
+		s.notifyMu.Lock()
+		notify := s.notify
+		s.notifyMu.Unlock()
+		if notify != nil {
+			s.republishOpenFiles(notify, filePath)
+		}
+	}
 	return nil
 }
 

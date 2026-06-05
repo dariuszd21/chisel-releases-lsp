@@ -408,3 +408,73 @@ slices:
 		t.Errorf("filtered symbol name: got %q", filtered[0].Name)
 	}
 }
+
+func TestDidClose_RevertsIndexToDisk(t *testing.T) {
+// Set up a real on-disk release with one package.
+dir := t.TempDir()
+slicesDir := filepath.Join(dir, "slices")
+if err := os.MkdirAll(slicesDir, 0755); err != nil {
+t.Fatal(err)
+}
+diskContent := `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`
+filePath := filepath.Join(slicesDir, "libc6.yaml")
+if err := os.WriteFile(filePath, []byte(diskContent), 0644); err != nil {
+t.Fatal(err)
+}
+
+idx, err := index.New(dir, nil, nil)
+if err != nil {
+t.Fatal(err)
+}
+defer idx.Close()
+
+// Simulate an unsaved edit: inject an extra slice into the index.
+editedContent := diskContent + "  injected:\n    contents:\n      /tmp/evil:\n"
+editedSF, err := parser.ParseBytes([]byte(editedContent))
+if err != nil {
+t.Fatal(err)
+}
+idx.UpdateFile(filePath, editedSF)
+
+// Verify the injected slice is visible before close.
+refs := idx.AllSliceRefs()
+found := false
+for _, r := range refs {
+if r == "libc6_injected" {
+found = true
+}
+}
+if !found {
+t.Fatalf("expected libc6_injected in index before close, got: %v", refs)
+}
+
+// Simulate textDocumentDidClose by reverting the index to disk.
+srv := lsp.NewWithIndex(idx)
+if err := srv.ExportRevertToDisk(filePath); err != nil {
+t.Fatalf("ExportRevertToDisk: %v", err)
+}
+
+// Verify the injected slice is gone after revert.
+refs = idx.AllSliceRefs()
+for _, r := range refs {
+if r == "libc6_injected" {
+t.Errorf("libc6_injected still in index after close, refs: %v", refs)
+}
+}
+
+// The legitimate slice should still be there.
+found = false
+for _, r := range refs {
+if r == "libc6_libs" {
+found = true
+}
+}
+if !found {
+t.Errorf("libc6_libs missing after revert, refs: %v", refs)
+}
+}

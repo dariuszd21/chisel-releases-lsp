@@ -70,7 +70,15 @@ func (s *Server) ExportWorkspaceSymbol(query string) ([]protocol.SymbolInformati
 	return s.workspaceSymbol(nil, &protocol.WorkspaceSymbolParams{Query: query})
 }
 
-// ExportFilePathToURI exposes filePathToURI for testing.
+// ExportRevertToDisk exposes the index-revert logic of textDocumentDidClose for testing.
+// It reverts the given filePath in the index back to disk state (or removes it if the file is gone).
+// Returns the error from IndexFile if any.
+func (s *Server) ExportRevertToDisk(filePath string) error {
+	if s.idx == nil {
+		return nil
+	}
+	return s.idx.IndexFile(filePath)
+}
 func ExportFilePathToURI(p string) protocol.DocumentUri {
 	return filePathToURI(p)
 }
