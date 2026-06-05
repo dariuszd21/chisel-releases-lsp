@@ -575,6 +575,12 @@ slices:
 	if pkg.Children[0].Name != "bins" || pkg.Children[1].Name != "config" {
 		t.Errorf("slice children order: got [%q, %q]", pkg.Children[0].Name, pkg.Children[1].Name)
 	}
+	// Slices should use SymbolKindKey (20), not Function.
+	for _, child := range pkg.Children {
+		if child.Kind != 20 { // SymbolKindKey = 20
+			t.Errorf("slice %q kind: got %d, want Key(20)", child.Name, child.Kind)
+		}
+	}
 }
 
 func TestWorkspaceSymbol(t *testing.T) {
@@ -613,6 +619,12 @@ slices:
 	}
 	if filtered[0].Name != "openssl_bins" {
 		t.Errorf("filtered symbol name: got %q", filtered[0].Name)
+	}
+	// Workspace symbols should use SymbolKindKey (20), not Function.
+	for _, s := range all {
+		if s.Kind != 20 { // SymbolKindKey = 20
+			t.Errorf("workspace symbol %q kind: got %d, want Key(20)", s.Name, s.Kind)
+		}
 	}
 }
 
@@ -789,6 +801,76 @@ t.Fatal(err)
 if locs == nil || len(locs) != 0 {
 t.Errorf("expected empty locations, got %v", locs)
 }
+}
+
+func TestReferences_IncludeDeclaration(t *testing.T) {
+	// When includeDeclaration=true, the definition's NameRange should be
+	// prepended to the results even when there are no other references.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  copyright:
+    contents:
+      /usr/share/doc/libc6/copyright:
+`,
+	})
+
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	content := `package: libc6
+slices:
+  copyright:
+    contents:
+      /usr/share/doc/libc6/copyright:
+`
+	srv := lsp.NewWithIndex(idx)
+	// Line 2 is "  copyright:" — nobody references libc6_copyright.
+	// Without includeDeclaration, result is empty.
+	locs := srv.ExportReferencesWithDecl(libc6Path, content, 2, 3)
+	if len(locs) != 1 {
+		t.Fatalf("expected 1 location (definition) with includeDeclaration=true, got %d: %v", len(locs), locs)
+	}
+	// The returned location must point to libc6.yaml.
+	if locs[0].URI != lsp.ExportFilePathToURI(libc6Path) {
+		t.Errorf("definition location URI: got %s, want %s", locs[0].URI, lsp.ExportFilePathToURI(libc6Path))
+	}
+}
+
+func TestReferences_IncludeDeclarationWithRefs(t *testing.T) {
+	// When includeDeclaration=true, definition is first and references follow.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+		"openssl.yaml": `package: openssl
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`,
+	})
+
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	content := `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`
+	srv := lsp.NewWithIndex(idx)
+	// Line 2 is "  libs:" — definition cursor; openssl.yaml has 1 reference.
+	locs := srv.ExportReferencesWithDecl(libc6Path, content, 2, 3)
+	if len(locs) != 2 {
+		t.Fatalf("expected 2 locations (1 definition + 1 ref), got %d: %v", len(locs), locs)
+	}
+	// First must be the definition (libc6.yaml).
+	if locs[0].URI != lsp.ExportFilePathToURI(libc6Path) {
+		t.Errorf("first location should be definition (libc6.yaml), got %s", locs[0].URI)
+	}
 }
 
 // --- textDocument/rename ---

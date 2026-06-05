@@ -101,6 +101,11 @@ func (s *Server) ExportReferences(filePath string, line, char int) ([]protocol.L
 	})
 }
 
+// ExportReferencesWithDecl calls computeReferences with includeDeclaration=true.
+func (s *Server) ExportReferencesWithDecl(filePath, text string, line, char int) []protocol.Location {
+	return s.computeReferences(filePath, text, line, char, true)
+}
+
 // ExportReindexAndPublish exposes reindexAndPublish for testing.
 func (s *Server) ExportReindexAndPublish(n Notifier, filePath string, content []byte) {
 	s.reindexAndPublish(n, filePath, content)

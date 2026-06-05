@@ -31,29 +31,48 @@ func (s *Server) textDocumentReferences(_ *glsp.Context, params *protocol.Refere
 	line := int(params.Position.Line)
 	char := int(params.Position.Character)
 
+	locs := s.computeReferences(filePath, text, line, char, params.Context.IncludeDeclaration)
+	// Return empty (not nil) so editors show "No references found" instead of an error.
+	if locs == nil {
+		return []protocol.Location{}, nil
+	}
+	return locs, nil
+}
+
+// computeReferences resolves the token at (line, char) to a (pkg, sliceName)
+// pair and returns all essential-list locations that reference it.
+// When includeDeclaration is true, the slice's own definition location is
+// prepended to the results so the caller can navigate to the definition too.
+func (s *Server) computeReferences(filePath, text string, line, char int, includeDeclaration bool) []protocol.Location {
 	token := wordAtPosition(text, line, char)
 	if token == "" {
-		return nil, nil
+		return nil
 	}
 
 	pkg, sliceName := resolveRefTarget(s, filePath, token)
 	if pkg == "" {
-		return nil, nil
+		return nil
 	}
 
-	indexed := s.idx.FindReferences(pkg, sliceName)
-	if len(indexed) == 0 {
-		return []protocol.Location{}, nil
+	var locs []protocol.Location
+
+	// Optionally prepend the definition location.
+	if includeDeclaration {
+		if is := s.idx.LookupSlice(pkg, sliceName); is != nil {
+			locs = append(locs, protocol.Location{
+				URI:   filePathToURI(is.File),
+				Range: toProtocolRange(is.Def.NameRange),
+			})
+		}
 	}
 
-	locs := make([]protocol.Location, 0, len(indexed))
-	for _, r := range indexed {
+	for _, r := range s.idx.FindReferences(pkg, sliceName) {
 		locs = append(locs, protocol.Location{
 			URI:   filePathToURI(r.File),
 			Range: toProtocolRange(r.Range),
 		})
 	}
-	return locs, nil
+	return locs
 }
 
 // resolveRefTarget resolves the cursor token to a (pkg, sliceName) pair.

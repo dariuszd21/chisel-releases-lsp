@@ -12,7 +12,7 @@ protocol "github.com/tliron/glsp/protocol_3_16"
 
 // textDocumentDocumentSymbol returns a hierarchy of symbols for the given file.
 // For a chisel slice file it returns one Module symbol (the package) whose
-// children are Function symbols, one per slice.
+// children are Key symbols, one per slice.
 func (s *Server) textDocumentDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
 if s.idx == nil {
 return nil, nil
@@ -39,7 +39,7 @@ detail := sliceDetail(sd)
 sym := protocol.DocumentSymbol{
 Name:           name,
 Detail:         &detail,
-Kind:           protocol.SymbolKindFunction,
+Kind:           protocol.SymbolKindKey,
 Range:          toProtocolRange(sd.NameRange),
 SelectionRange: toProtocolRange(sd.NameRange),
 }
@@ -87,7 +87,7 @@ continue
 }
 results = append(results, protocol.SymbolInformation{
 Name: ref,
-Kind: protocol.SymbolKindFunction,
+Kind: protocol.SymbolKindKey,
 Location: protocol.Location{
 URI:   filePathToURI(is.File),
 Range: toProtocolRange(is.Def.NameRange),
