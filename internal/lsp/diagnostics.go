@@ -31,7 +31,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		return nil
 	}
 
-	var diags []protocol.Diagnostic
+	diags := []protocol.Diagnostic{}
 
 	// 1. Glob validation
 	for _, d := range analysis.ValidateGlobs(filePath, sf) {

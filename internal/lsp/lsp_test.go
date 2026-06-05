@@ -281,3 +281,27 @@ slices:
 		t.Errorf("expected unknown-ref diagnostic, got: %v", diags)
 	}
 }
+
+func TestComputeDiagnostics_CleanFileReturnsEmpty(t *testing.T) {
+	// A valid file with no issues must return [] (not nil) so that the client
+	// clears any previously shown squiggles.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+	})
+
+	srv := lsp.NewWithIndex(idx)
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	diags := srv.ExportComputeDiagnostics(libc6Path)
+
+	if diags == nil {
+		t.Error("expected non-nil (empty) diagnostic slice for clean file, got nil")
+	}
+	if len(diags) != 0 {
+		t.Errorf("expected zero diagnostics for clean file, got: %v", diags)
+	}
+}
