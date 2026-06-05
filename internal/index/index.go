@@ -100,6 +100,47 @@ func (idx *Index) AllSliceRefs() []string {
 	return refs
 }
 
+// IndexedRef is one occurrence of a pkg_slice reference inside an essential list.
+type IndexedRef struct {
+	File  string       // absolute path to the .yaml file containing the reference
+	Range parser.Range // position of the reference value within that file
+}
+
+// FindReferences returns all essential-list occurrences of pkg_slice across the
+// entire index, sorted by file path then line number.  Both top-level essential
+// (on the SliceFile) and per-slice essential entries are included.
+func (idx *Index) FindReferences(pkg, sliceName string) []IndexedRef {
+	target := pkg + "_" + sliceName
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	// Collect sorted file paths for deterministic output.
+	paths := make([]string, 0, len(idx.files))
+	for p := range idx.files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var refs []IndexedRef
+	for _, filePath := range paths {
+		sf := idx.files[filePath]
+		for _, e := range sf.Essential {
+			if e.Value == target {
+				refs = append(refs, IndexedRef{File: filePath, Range: e.ValueRange})
+			}
+		}
+		for _, sliceName := range sf.SliceOrder {
+			sd := sf.Slices[sliceName]
+			for _, e := range sd.Essential {
+				if e.Value == target {
+					refs = append(refs, IndexedRef{File: filePath, Range: e.ValueRange})
+				}
+			}
+		}
+	}
+	return refs
+}
+
 // AllFiles returns all currently indexed file paths in sorted order.
 func (idx *Index) AllFiles() []string {
 	idx.mu.RLock()
