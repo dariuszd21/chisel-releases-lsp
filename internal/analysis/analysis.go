@@ -5,6 +5,7 @@ package analysis
 
 import (
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/canonical/chisel-releases-lsp/internal/index"
@@ -31,7 +32,8 @@ type Diagnostic struct {
 // any path that is not a valid glob pattern.
 func ValidateGlobs(filePath string, sf *parser.SliceFile) []Diagnostic {
 	var diags []Diagnostic
-	for _, sd := range sf.Slices {
+	for _, name := range sf.SliceOrder {
+		sd := sf.Slices[name]
 		for _, ce := range sd.Contents {
 			if msg := validateGlobPath(ce.Path); msg != "" {
 				diags = append(diags, Diagnostic{
@@ -118,7 +120,15 @@ func DetectCollisions(idx *index.Index) []Collision {
 	}
 
 	var collisions []Collision
-	for p, entries := range pathMap {
+	// Sort paths for deterministic output.
+	paths := make([]string, 0, len(pathMap))
+	for p := range pathMap {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, p := range paths {
+		entries := pathMap[p]
 		// Group by package
 		pkgSet := make(map[string][]entry)
 		for _, e := range entries {
@@ -127,11 +137,12 @@ func DetectCollisions(idx *index.Index) []Collision {
 		if len(pkgSet) < 2 {
 			continue // same package owning it multiple times is allowed
 		}
-		// Collect one representative entry per package for collision reporting
+		// Collect one representative entry per package; sort by pkg for determinism.
 		var reps []entry
 		for _, es := range pkgSet {
 			reps = append(reps, es[0])
 		}
+		sort.Slice(reps, func(i, j int) bool { return reps[i].pkg < reps[j].pkg })
 		for i := 0; i < len(reps); i++ {
 			for j := i + 1; j < len(reps); j++ {
 				a, b := reps[i], reps[j]

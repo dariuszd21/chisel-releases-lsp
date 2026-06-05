@@ -89,10 +89,11 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 }
 
 // collectEssentialRefs gathers all essential refs from a SliceFile (top-level + per-slice).
+// Slices are visited in SliceOrder for deterministic results.
 func collectEssentialRefs(sf *parser.SliceFile) []parser.EssentialRef {
 	refs := append([]parser.EssentialRef{}, sf.Essential...)
-	for _, sd := range sf.Slices {
-		refs = append(refs, sd.Essential...)
+	for _, name := range sf.SliceOrder {
+		refs = append(refs, sf.Slices[name].Essential...)
 	}
 	return refs
 }
