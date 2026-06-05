@@ -64,10 +64,11 @@ func validateGlobPath(p string) string {
 	if err != nil {
 		return "invalid glob pattern: " + err.Error()
 	}
-	// Validate that ** only appears as a complete path segment or at the end.
+	// Validate that ** only appears as a complete path segment (e.g. /dir/**/file is fine,
+	// but /dir/foo** or /dir/**.so are not).
 	for _, seg := range strings.Split(p, "/") {
 		if strings.Contains(seg, "**") && seg != "**" {
-			return "** must appear as a standalone path segment (e.g. /dir/**/file is not valid; use /dir/**)"
+			return "** must appear as a standalone path segment (e.g. /dir/**foo is not valid)"
 		}
 	}
 	return ""

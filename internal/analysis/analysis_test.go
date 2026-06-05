@@ -109,6 +109,42 @@ slices:
 	}
 }
 
+func TestValidateGlobs_StarStarInPath(t *testing.T) {
+	// /dir/**/file is valid — ** is a complete path segment.
+	yaml := `package: p
+slices:
+  s:
+    contents:
+      /usr/share/**/README:
+`
+	sf, err := parser.ParseBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := analysis.ValidateGlobs("test.yaml", sf)
+	if len(diags) != 0 {
+		t.Errorf("/usr/share/**/README should be valid, got diagnostics: %v", diags)
+	}
+}
+
+func TestValidateGlobs_StarStarWithSuffix(t *testing.T) {
+	// **.so in a segment is invalid — ** is mixed with other characters.
+	yaml := `package: p
+slices:
+  s:
+    contents:
+      /usr/lib/**.so:
+`
+	sf, err := parser.ParseBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := analysis.ValidateGlobs("test.yaml", sf)
+	if len(diags) == 0 {
+		t.Error("expected diagnostic for **.so segment, got none")
+	}
+}
+
 func setupCollisionIndex(t *testing.T, files map[string]string) *index.Index {
 	t.Helper()
 	dir := t.TempDir()
