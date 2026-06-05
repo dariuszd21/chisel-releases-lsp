@@ -109,7 +109,7 @@ slices:
 
 func TestCompletionPrefixAndRange_WithPrefix(t *testing.T) {
 	// Cursor at "libc6" (partial) on line 4, char 13 — after "      - libc6"
-	prefix, r := lsp.ExportCompletionPrefixAndRange(completionText, 4, 13)
+	prefix, r, needsSpace := lsp.ExportCompletionPrefixAndRange(completionText, 4, 13)
 	if prefix != "libc6" {
 		t.Errorf("prefix: got %q, want %q", prefix, "libc6")
 	}
@@ -120,12 +120,15 @@ func TestCompletionPrefixAndRange_WithPrefix(t *testing.T) {
 	if r.End.Character != 18 { // word "libc6_libs" ends at col 18
 		t.Errorf("range end char: got %d, want 18 (end of word)", r.End.Character)
 	}
+	if needsSpace {
+		t.Error("needsLeadingSpace should be false when '- ' marker present")
+	}
 }
 
 func TestCompletionPrefixAndRange_TriggerOnly(t *testing.T) {
 	// Cursor right after "-" on a fresh line: "      -" (col 7), no space yet.
 	text := "package: foo\nslices:\n  bins:\n    essential:\n      -\n    contents:\n      /usr/bin/foo:\n"
-	prefix, r := lsp.ExportCompletionPrefixAndRange(text, 4, 7)
+	prefix, r, needsSpace := lsp.ExportCompletionPrefixAndRange(text, 4, 7)
 	if prefix != "" {
 		t.Errorf("prefix: got %q, want empty", prefix)
 	}
@@ -133,17 +136,25 @@ func TestCompletionPrefixAndRange_TriggerOnly(t *testing.T) {
 	if r.Start.Character != 7 || r.End.Character != 7 {
 		t.Errorf("range: got {%d,%d}, want {7,7}", r.Start.Character, r.End.Character)
 	}
+	// Trigger-only: inserting the ref without a space would give "      -ref" — caller
+	// must prepend " ".
+	if !needsSpace {
+		t.Error("needsLeadingSpace should be true in trigger-only mode")
+	}
 }
 
 func TestCompletionPrefixAndRange_AfterSpace(t *testing.T) {
 	// Cursor at "      - " (col 8, right after the space), nothing typed yet.
 	text := "package: foo\nslices:\n  bins:\n    essential:\n      - \n    contents:\n      /usr/bin/foo:\n"
-	prefix, r := lsp.ExportCompletionPrefixAndRange(text, 4, 8)
+	prefix, r, needsSpace := lsp.ExportCompletionPrefixAndRange(text, 4, 8)
 	if prefix != "" {
 		t.Errorf("prefix: got %q, want empty", prefix)
 	}
 	if r.Start.Character != 8 {
 		t.Errorf("range start char: got %d, want 8", r.Start.Character)
+	}
+	if needsSpace {
+		t.Error("needsLeadingSpace should be false after the space is typed")
 	}
 }
 
@@ -260,6 +271,43 @@ slices:
 		}
 		if te.NewText != it.Label {
 			t.Errorf("item %q: TextEdit NewText %q != Label", it.Label, te.NewText)
+		}
+	}
+}
+
+func TestCompletion_TriggerOnly_TextEditHasLeadingSpace(t *testing.T) {
+	// When completion fires on bare "-" (no space typed yet), the TextEdit
+	// NewText must begin with " " so the result is "- ref" not "-ref".
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+	})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+	srv := lsp.NewWithIndex(idx)
+
+	// Line 4 is "      -" — trigger fired right after the dash (col 7).
+	triggerText := "package: foo\nslices:\n  bins:\n    essential:\n      -\n    contents:\n      /usr/bin/foo:\n"
+	items := srv.ExportCompletion(fooPath, triggerText, 4, 7)
+	if len(items) == 0 {
+		t.Fatal("expected completion items in trigger-only mode, got none")
+	}
+	for _, it := range items {
+		te, ok := it.TextEdit.(protocol.TextEdit)
+		if !ok {
+			t.Errorf("item %q: TextEdit is not a protocol.TextEdit (got %T)", it.Label, it.TextEdit)
+			continue
+		}
+		if !strings.HasPrefix(te.NewText, " ") {
+			t.Errorf("item %q: NewText %q should start with ' ' to produce valid YAML",
+				it.Label, te.NewText)
+		}
+		// Label should NOT have the leading space (it's just the slice ref name).
+		if strings.HasPrefix(it.Label, " ") {
+			t.Errorf("item %q: Label should not have a leading space", it.Label)
 		}
 	}
 }
@@ -793,13 +841,16 @@ slices:
 
 libc6Path := filepath.Join(slicesDir, "libc6.yaml")
 srv := lsp.NewWithIndex(idx)
-// Line 2 is "  copyright:" — nobody references libc6_copyright
+// Line 2 is "  copyright:" — nobody externally references libc6_copyright,
+// so the fallback returns the definition itself (1 location).
 locs, err := srv.ExportReferences(libc6Path, 2, 3)
 if err != nil {
 t.Fatal(err)
 }
-if locs == nil || len(locs) != 0 {
-t.Errorf("expected empty locations, got %v", locs)
+// Fallback: the definition location is returned so the user always gets
+// at least one result when calling Find References on a defined slice.
+if len(locs) != 1 {
+t.Errorf("expected 1 location (definition fallback), got %d: %v", len(locs), locs)
 }
 }
 

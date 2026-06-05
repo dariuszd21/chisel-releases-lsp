@@ -72,6 +72,21 @@ func (s *Server) computeReferences(filePath, text string, line, char int, includ
 			Range: toProtocolRange(r.Range),
 		})
 	}
+
+	// Fallback: when no external references exist (and we haven't already
+	// prepended the declaration), return the definition's own location so
+	// the user always gets at least one result when calling Find References
+	// on a defined slice. This prevents the confusing "No references found"
+	// message when the cursor is on a slice that simply isn't used anywhere yet.
+	if len(locs) == 0 {
+		if is := s.idx.LookupSlice(pkg, sliceName); is != nil {
+			locs = append(locs, protocol.Location{
+				URI:   filePathToURI(is.File),
+				Range: toProtocolRange(is.Def.NameRange),
+			})
+		}
+	}
+
 	return locs
 }
 

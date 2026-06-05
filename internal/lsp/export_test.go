@@ -150,6 +150,6 @@ func (s *Server) ExportCompletion(filePath, text string, line, char int) []proto
 }
 
 // ExportCompletionPrefixAndRange exposes completionPrefixAndRange for testing.
-func ExportCompletionPrefixAndRange(text string, line, char int) (string, protocol.Range) {
+func ExportCompletionPrefixAndRange(text string, line, char int) (string, protocol.Range, bool) {
 	return completionPrefixAndRange(text, line, char)
 }

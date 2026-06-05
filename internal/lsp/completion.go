@@ -42,13 +42,19 @@ func (s *Server) computeCompletion(text string, uri protocol.DocumentUri, line, 
 	}
 
 	// Compute the prefix typed after "- " and the replacement range.
-	prefix, editRange := completionPrefixAndRange(text, line, char)
+	prefix, editRange, needsLeadingSpace := completionPrefixAndRange(text, line, char)
 
 	var items []protocol.CompletionItem
 	kind := protocol.CompletionItemKindReference
 	for _, ref := range s.idx.AllSliceRefs() {
 		if strings.HasPrefix(ref, prefix) {
 			ref := ref
+			newText := ref
+			if needsLeadingSpace {
+				// Trigger fired on bare "-" (no space typed yet). Insert a
+				// space before the ref so the result is valid YAML: "- ref".
+				newText = " " + ref
+			}
 			items = append(items, protocol.CompletionItem{
 				Label: ref,
 				Kind:  &kind,
@@ -56,7 +62,7 @@ func (s *Server) computeCompletion(text string, uri protocol.DocumentUri, line, 
 				// token after "- " and do not clobber the list-item marker.
 				TextEdit: protocol.TextEdit{
 					Range:   editRange,
-					NewText: ref,
+					NewText: newText,
 				},
 			})
 		}
@@ -66,24 +72,28 @@ func (s *Server) computeCompletion(text string, uri protocol.DocumentUri, line, 
 }
 
 // completionPrefixAndRange returns the text already typed after the "- " list
-// marker (used to filter candidates) and the edit range that should be replaced
-// when a completion item is accepted.
+// marker (used to filter candidates), the edit range that should be replaced
+// when a completion item is accepted, and whether a leading space must be
+// prepended to the NewText (true when the trigger fired on bare "-" with no
+// space typed yet).
 //
 // For a line like "      - libc6" with cursor at column 14:
-//   - prefix   = "libc6"
-//   - editRange = {line, 8} → {line, 14}   (replaces "libc6" only)
+//   - prefix          = "libc6"
+//   - editRange       = {line, 8} → {line, 14}   (replaces "libc6" only)
+//   - needsLeadingSpace = false
 //
 // For a trigger on "      -" (no space yet, cursor at column 7):
-//   - prefix   = ""
-//   - editRange = {line, 7} → {line, 7}   (insert at cursor; caller adds no space)
-func completionPrefixAndRange(text string, line, char int) (prefix string, editRange protocol.Range) {
+//   - prefix          = ""
+//   - editRange       = {line, 7} → {line, 7}   (zero-width insert after "-")
+//   - needsLeadingSpace = true   (caller must use " "+ref as NewText)
+func completionPrefixAndRange(text string, line, char int) (prefix string, editRange protocol.Range, needsLeadingSpace bool) {
 	lines := strings.Split(text, "\n")
 	// Default: zero-width insert at cursor.
 	pos := protocol.Position{Line: uint32(line), Character: uint32(char)}
 	editRange = protocol.Range{Start: pos, End: pos}
 
 	if line >= len(lines) {
-		return "", editRange
+		return "", editRange, false
 	}
 	l := lines[line]
 	col := char
@@ -98,12 +108,13 @@ func completionPrefixAndRange(text string, line, char int) (prefix string, editR
 		valueStart = afterDash + 2 // character right after "- "
 	} else if dashOnly := strings.Index(l[:col], "-"); dashOnly >= 0 {
 		// Trigger character fired on "-" before the space was typed.
-		// Edit range starts right after the "-".
+		// Edit range starts right after the "-"; caller must prepend " ".
 		valueStart = dashOnly + 1
+		needsLeadingSpace = true
 	}
 
 	if valueStart < 0 {
-		return "", editRange
+		return "", editRange, false
 	}
 
 	prefix = l[valueStart:col]
@@ -119,5 +130,5 @@ func completionPrefixAndRange(text string, line, char int) (prefix string, editR
 		Start: protocol.Position{Line: uint32(line), Character: uint32(valueStart)},
 		End:   protocol.Position{Line: uint32(line), Character: uint32(wordEnd)},
 	}
-	return prefix, editRange
+	return prefix, editRange, needsLeadingSpace
 }
