@@ -1,10 +1,10 @@
 package lsp
 
 import (
-	"github.com/canonical/chisel-releases-lsp/internal/index"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/index"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
-	"github.com/canonical/chisel-releases-lsp/internal/parser"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 // ExportWordAtPosition exposes wordAtPosition for testing.

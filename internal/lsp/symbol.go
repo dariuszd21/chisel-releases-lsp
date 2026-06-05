@@ -7,7 +7,7 @@ import (
 "github.com/tliron/glsp"
 protocol "github.com/tliron/glsp/protocol_3_16"
 
-"github.com/canonical/chisel-releases-lsp/internal/parser"
+"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 // textDocumentDocumentSymbol returns a hierarchy of symbols for the given file.

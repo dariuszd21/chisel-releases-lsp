@@ -6,7 +6,7 @@ import (
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
-	"github.com/canonical/chisel-releases-lsp/internal/parser"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 func (s *Server) textDocumentDefinition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {

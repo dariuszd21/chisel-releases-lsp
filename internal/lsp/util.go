@@ -7,7 +7,7 @@ import (
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
-	"github.com/canonical/chisel-releases-lsp/internal/parser"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 // uriToPath converts a file:// URI to an OS path.

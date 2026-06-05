@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/canonical/chisel-releases-lsp/internal/parser"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 const sampleYAML = `

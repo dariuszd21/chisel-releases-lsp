@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/canonical/chisel-releases-lsp/internal/parser"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 	"github.com/fsnotify/fsnotify"
 )
 

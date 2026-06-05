@@ -1,4 +1,4 @@
-module github.com/canonical/chisel-releases-lsp
+module github.com/dariuszd21/chisel-releases-lsp
 
 go 1.26.3
 

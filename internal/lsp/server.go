@@ -11,8 +11,8 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 	glspserver "github.com/tliron/glsp/server"
 
-	"github.com/canonical/chisel-releases-lsp/internal/index"
-	"github.com/canonical/chisel-releases-lsp/internal/parser"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/index"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 const lsName = "chisel-releases-lsp"

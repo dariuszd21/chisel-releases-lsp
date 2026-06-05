@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/canonical/chisel-releases-lsp/internal/analysis"
-	"github.com/canonical/chisel-releases-lsp/internal/index"
-	"github.com/canonical/chisel-releases-lsp/internal/parser"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/analysis"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/index"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 func TestValidateGlobs(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/canonical/chisel-releases-lsp/internal/index"
-	"github.com/canonical/chisel-releases-lsp/internal/parser"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/index"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 // Severity mirrors LSP diagnostic severity values.

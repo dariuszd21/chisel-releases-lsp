@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/canonical/chisel-releases-lsp/internal/lsp"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/lsp"
 )
 
 func main() {
