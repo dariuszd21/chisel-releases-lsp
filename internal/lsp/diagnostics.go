@@ -3,7 +3,6 @@ package lsp
 import (
 	"fmt"
 
-	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/dariuszd21/chisel-releases-lsp/internal/analysis"
@@ -11,13 +10,12 @@ import (
 )
 
 // publishDiagnosticsForFile computes and sends diagnostics for a single file.
-func (s *Server) publishDiagnosticsForFile(ctx *glsp.Context, filePath string) {
-	s.storeNotify(ctx)
+func (s *Server) publishDiagnosticsForFile(n Notifier, filePath string) {
 	diags := s.computeDiagnostics(filePath)
 	if diags == nil {
 		return
 	}
-	publishDiagnostics(ctx, filePathToURI(filePath), diags)
+	publishDiagnostics(n, filePathToURI(filePath), diags)
 }
 
 // computeDiagnostics returns the full diagnostic list for filePath.

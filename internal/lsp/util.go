@@ -45,12 +45,28 @@ func strPtr(s string) *string { return &s }
 // severityPtr returns a pointer to s.
 func severityPtr(s protocol.DiagnosticSeverity) *protocol.DiagnosticSeverity { return &s }
 
+// Notifier abstracts the LSP notification channel so internal helpers can
+// be tested without a live JSON-RPC connection.
+type Notifier interface {
+	Notify(method string, params any)
+}
+
+// ctxNotifier wraps a *glsp.Context to implement Notifier.
+type ctxNotifier struct{ ctx *glsp.Context }
+
+func (c ctxNotifier) Notify(m string, p any) {
+	if c.ctx == nil {
+		return // nil-safe: test exports call internal helpers with nil ctx
+	}
+	c.ctx.Notify(m, p)
+}
+
 // publishDiagnostics sends a textDocument/publishDiagnostics notification.
-func publishDiagnostics(ctx *glsp.Context, uri protocol.DocumentUri, diags []protocol.Diagnostic) {
-	if ctx == nil {
+func publishDiagnostics(n Notifier, uri protocol.DocumentUri, diags []protocol.Diagnostic) {
+	if n == nil {
 		return
 	}
-	ctx.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+	n.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         uri,
 		Diagnostics: diags,
 	})

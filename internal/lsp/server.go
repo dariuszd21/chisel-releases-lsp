@@ -28,11 +28,11 @@ type Server struct {
 	docMu sync.RWMutex
 	docs  map[string]string
 
-	// notifyMu guards notify; notify is set from the first request context and
+	// notifyMu guards notifier; notifier is set from the first request context and
 	// used by background goroutines that must send LSP notifications without a
 	// request-scoped context.
 	notifyMu sync.Mutex
-	notify   func(method string, params any)
+	notifier Notifier
 }
 
 // New creates a Server.
@@ -80,7 +80,7 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 	} else {
 		// Store the notifier from this ctx before spawning the index so that
 		// background callbacks never capture a stale request-scoped context.
-		s.storeNotify(ctx)
+		s.storeNotifier(ctx)
 		idx, idxErr := index.New(root,
 			func(filePath string) { s.publishDiagnosticsBackground(filePath) },
 			func(filePath string) { s.clearDiagnosticsBackground(filePath) },
@@ -135,8 +135,10 @@ func (s *Server) textDocumentDidOpen(ctx *glsp.Context, params *protocol.DidOpen
 	if err != nil {
 		return nil
 	}
+	s.storeNotifier(ctx)
+	n := ctxNotifier{ctx}
 	s.setDoc(filePath, params.TextDocument.Text)
-	s.reindexAndPublish(ctx, filePath, []byte(params.TextDocument.Text))
+	s.reindexAndPublish(n, filePath, []byte(params.TextDocument.Text))
 	return nil
 }
 
@@ -152,8 +154,10 @@ func (s *Server) textDocumentDidChange(ctx *glsp.Context, params *protocol.DidCh
 	if !ok {
 		return nil
 	}
+	s.storeNotifier(ctx)
+	n := ctxNotifier{ctx}
 	s.setDoc(filePath, change.Text)
-	s.reindexAndPublish(ctx, filePath, []byte(change.Text))
+	s.reindexAndPublish(n, filePath, []byte(change.Text))
 	return nil
 }
 
@@ -162,12 +166,14 @@ func (s *Server) textDocumentDidSave(ctx *glsp.Context, params *protocol.DidSave
 	if err != nil {
 		return nil
 	}
+	s.storeNotifier(ctx)
+	n := ctxNotifier{ctx}
 	if params.Text != nil {
 		s.setDoc(filePath, *params.Text)
-		s.reindexAndPublish(ctx, filePath, []byte(*params.Text))
+		s.reindexAndPublish(n, filePath, []byte(*params.Text))
 	} else if s.idx != nil {
 		if idxErr := s.idx.IndexFile(filePath); idxErr != nil {
-			publishDiagnostics(ctx, filePathToURI(filePath), []protocol.Diagnostic{
+			publishDiagnostics(n, filePathToURI(filePath), []protocol.Diagnostic{
 				{
 					Range:    protocol.Range{},
 					Severity: severityPtr(protocol.DiagnosticSeverityError),
@@ -176,19 +182,19 @@ func (s *Server) textDocumentDidSave(ctx *glsp.Context, params *protocol.DidSave
 				},
 			})
 		} else {
-			s.publishDiagnosticsForFile(ctx, filePath)
+			s.publishDiagnosticsForFile(n, filePath)
 		}
 	}
 	return nil
 }
 
-func (s *Server) reindexAndPublish(ctx *glsp.Context, filePath string, content []byte) {
+func (s *Server) reindexAndPublish(n Notifier, filePath string, content []byte) {
 	if s.idx == nil {
 		return
 	}
 	sf, err := parser.ParseBytes(content)
 	if err != nil {
-		publishDiagnostics(ctx, filePathToURI(filePath), []protocol.Diagnostic{
+		publishDiagnostics(n, filePathToURI(filePath), []protocol.Diagnostic{
 			{
 				Range:    protocol.Range{},
 				Severity: severityPtr(protocol.DiagnosticSeverityError),
@@ -199,7 +205,7 @@ func (s *Server) reindexAndPublish(ctx *glsp.Context, filePath string, content [
 		return
 	}
 	s.idx.UpdateFile(filePath, sf)
-	s.publishDiagnosticsForFile(ctx, filePath)
+	s.publishDiagnosticsForFile(n, filePath)
 }
 
 func (s *Server) setDoc(filePath, text string) {
@@ -220,12 +226,14 @@ func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidClo
 	if err != nil {
 		return nil
 	}
+	s.storeNotifier(ctx)
+	n := ctxNotifier{ctx}
 	s.docMu.Lock()
 	delete(s.docs, filePath)
 	s.docMu.Unlock()
 
 	if s.idx == nil {
-		publishDiagnostics(ctx, params.TextDocument.URI, []protocol.Diagnostic{})
+		publishDiagnostics(n, params.TextDocument.URI, []protocol.Diagnostic{})
 		return nil
 	}
 
@@ -233,27 +241,26 @@ func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidClo
 	// not the unsaved in-memory buffer that was open in the editor.
 	if idxErr := s.idx.IndexFile(filePath); idxErr != nil {
 		// File is gone or broken on disk — clear its diagnostics.
-		publishDiagnostics(ctx, params.TextDocument.URI, []protocol.Diagnostic{})
+		publishDiagnostics(n, params.TextDocument.URI, []protocol.Diagnostic{})
 	} else {
 		// Publish the real on-disk diagnostics and update open peers (collision
 		// detection may now produce different results for them).
-		s.publishDiagnosticsForFile(ctx, filePath)
-		s.notifyMu.Lock()
-		notify := s.notify
-		s.notifyMu.Unlock()
-		if notify != nil {
-			s.republishOpenFiles(notify, filePath)
-		}
+		s.publishDiagnosticsForFile(n, filePath)
+		s.republishOpenFiles(n, filePath)
 	}
 	return nil
 }
 
-// storeNotify caches a notification sender from ctx for use by background goroutines.
-func (s *Server) storeNotify(ctx *glsp.Context) {
+// storeNotifier caches a notification sender from ctx for use by background goroutines.
+// It keeps the first non-nil ctx seen, so background goroutines always have a valid channel.
+func (s *Server) storeNotifier(ctx *glsp.Context) {
+	if ctx == nil {
+		return
+	}
 	s.notifyMu.Lock()
 	defer s.notifyMu.Unlock()
-	if s.notify == nil {
-		s.notify = ctx.Notify
+	if s.notifier == nil {
+		s.notifier = ctxNotifier{ctx}
 	}
 }
 
@@ -268,42 +275,41 @@ func (s *Server) publishDiagnosticsBackground(filePath string) {
 		return
 	}
 	s.notifyMu.Lock()
-	notify := s.notify
+	n := s.notifier
 	s.notifyMu.Unlock()
-	if notify == nil {
+	if n == nil {
 		return
 	}
-	// Re-use the same diagnostics logic via a nil-context helper.
 	diags := s.computeDiagnostics(filePath)
-	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+	n.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         filePathToURI(filePath),
 		Diagnostics: diags,
 	})
 	// Republish all other open files: cross-file analysis (collision detection)
 	// may produce different results for them after this file changed.
-	s.republishOpenFiles(notify, filePath)
+	s.republishOpenFiles(n, filePath)
 }
 
 // clearDiagnosticsBackground sends an empty diagnostic list for filePath,
 // clearing any squiggles the client may be showing for a deleted file.
 func (s *Server) clearDiagnosticsBackground(filePath string) {
 	s.notifyMu.Lock()
-	notify := s.notify
+	n := s.notifier
 	s.notifyMu.Unlock()
-	if notify == nil {
+	if n == nil {
 		return
 	}
-	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+	n.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         filePathToURI(filePath),
 		Diagnostics: []protocol.Diagnostic{},
 	})
 	// Republish all other open files: a deleted file may have resolved collisions.
-	s.republishOpenFiles(notify, filePath)
+	s.republishOpenFiles(n, filePath)
 }
 
 // republishOpenFiles recomputes and pushes diagnostics for every document
 // currently open in the editor, skipping skipPath (already handled by the caller).
-func (s *Server) republishOpenFiles(notify func(string, any), skipPath string) {
+func (s *Server) republishOpenFiles(n Notifier, skipPath string) {
 	s.docMu.RLock()
 	open := make([]string, 0, len(s.docs))
 	for f := range s.docs {
@@ -318,7 +324,7 @@ func (s *Server) republishOpenFiles(notify func(string, any), skipPath string) {
 		if diags == nil {
 			continue
 		}
-		notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+		n.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 			URI:         filePathToURI(f),
 			Diagnostics: diags,
 		})
