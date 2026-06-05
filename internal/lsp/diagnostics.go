@@ -37,6 +37,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 			Range:    toProtocolRange(d.Range),
 			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
 			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodePackageNameMismatch),
 			Message:  d.Message,
 		})
 	}
@@ -47,6 +48,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 			Range:    toProtocolRange(d.Range),
 			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
 			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeInvalidGlob),
 			Message:  d.Message,
 		})
 	}
@@ -58,6 +60,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 				Range:    toProtocolRange(col.RangeA),
 				Severity: severityPtr(protocol.DiagnosticSeverityWarning),
 				Source:   strPtr("chisel-releases-lsp"),
+				Code:     diagCodePtr(DiagCodeSliceCollision),
 				Message:  fmt.Sprintf("slice collision: path %q also claimed by %s", col.Path, col.SliceB),
 			})
 		}
@@ -66,6 +69,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 				Range:    toProtocolRange(col.RangeB),
 				Severity: severityPtr(protocol.DiagnosticSeverityWarning),
 				Source:   strPtr("chisel-releases-lsp"),
+				Code:     diagCodePtr(DiagCodeSliceCollision),
 				Message:  fmt.Sprintf("slice collision: path %q also claimed by %s", col.Path, col.SliceA),
 			})
 		}
@@ -79,6 +83,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 				Range:    toProtocolRange(ref.ValueRange),
 				Severity: severityPtr(protocol.DiagnosticSeverityError),
 				Source:   strPtr("chisel-releases-lsp"),
+				Code:     diagCodePtr(DiagCodeInvalidSliceRef),
 				Message:  fmt.Sprintf("invalid slice reference %q: expected <package>_<slice>", ref.Value),
 			})
 			continue
@@ -88,6 +93,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 				Range:    toProtocolRange(ref.ValueRange),
 				Severity: severityPtr(protocol.DiagnosticSeverityWarning),
 				Source:   strPtr("chisel-releases-lsp"),
+				Code:     diagCodePtr(DiagCodeUnknownSliceRef),
 				Message:  fmt.Sprintf("unknown slice reference %q", ref.Value),
 			})
 		}

@@ -45,6 +45,21 @@ func strPtr(s string) *string { return &s }
 // severityPtr returns a pointer to s.
 func severityPtr(s protocol.DiagnosticSeverity) *protocol.DiagnosticSeverity { return &s }
 
+// Diagnostic code constants used to identify the kind of diagnostic and to
+// select applicable code actions in textDocument/codeAction.
+const (
+	DiagCodePackageNameMismatch = "package-name-mismatch"
+	DiagCodeInvalidGlob         = "invalid-glob"
+	DiagCodeSliceCollision      = "slice-collision"
+	DiagCodeInvalidSliceRef     = "invalid-slice-ref"
+	DiagCodeUnknownSliceRef     = "unknown-slice-ref"
+)
+
+// diagCodePtr wraps a diagnostic code string into the protocol's IntegerOrString type.
+func diagCodePtr(code string) *protocol.IntegerOrString {
+	return &protocol.IntegerOrString{Value: code}
+}
+
 // Notifier abstracts the LSP notification channel so internal helpers can
 // be tested without a live JSON-RPC connection.
 type Notifier interface {
