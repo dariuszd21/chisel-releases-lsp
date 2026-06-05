@@ -90,6 +90,10 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 			fmt.Fprintf(os.Stderr, "chisel-releases-lsp: index error: %v\n", idxErr)
 		} else {
 			s.idx = idx
+			// Push initial diagnostics for all indexed files in the background
+			// so the editor's Problems panel shows workspace-wide issues
+			// immediately, without waiting for each file to be opened.
+			go s.publishAllFileDiagnostics()
 		}
 	}
 
@@ -265,6 +269,32 @@ func (s *Server) storeNotifier(ctx *glsp.Context) {
 	defer s.notifyMu.Unlock()
 	if s.notifier == nil {
 		s.notifier = ctxNotifier{ctx}
+	}
+}
+
+// publishAllFileDiagnostics pushes diagnostics for every file in the index.
+// Called once at startup so the Problems panel shows workspace-wide issues
+// without the user having to open each file individually.
+func (s *Server) publishAllFileDiagnostics() {
+	if s.idx == nil {
+		return
+	}
+	s.notifyMu.Lock()
+	n := s.notifier
+	s.notifyMu.Unlock()
+	if n == nil {
+		return
+	}
+	for _, filePath := range s.idx.AllFiles() {
+		diags := s.computeDiagnostics(filePath)
+		if diags == nil {
+			continue
+		}
+		n.Notify(protocol.ServerTextDocumentPublishDiagnostics,
+			protocol.PublishDiagnosticsParams{
+				URI:         filePathToURI(filePath),
+				Diagnostics: diags,
+			})
 	}
 }
 
