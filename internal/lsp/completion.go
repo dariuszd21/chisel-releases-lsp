@@ -44,6 +44,12 @@ func (s *Server) computeCompletion(text string, uri protocol.DocumentUri, line, 
 	// Compute the prefix typed after "- " and the replacement range.
 	prefix, editRange, needsLeadingSpace, appendColon := completionPrefixAndRange(text, line, char)
 
+	// Only offer completions once the user has typed enough characters to be
+	// useful.  This prevents noisy popups immediately after "-" or at column 0.
+	if len(prefix) < s.minPrefixLen() {
+		return nil
+	}
+
 	var items []protocol.CompletionItem
 	kind := protocol.CompletionItemKindReference
 	for _, ref := range s.idx.AllSliceRefs() {

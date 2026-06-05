@@ -2,6 +2,7 @@
 package lsp
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -16,6 +17,22 @@ import (
 )
 
 const lsName = "chisel-releases-lsp"
+
+const defaultMinPrefixLen = 2
+
+// Config holds runtime-configurable server settings.
+type Config struct {
+	// MinPrefixLen is the minimum number of characters the user must type in
+	// an essential reference before completions are offered.  Minimum value
+	// is 2 (values lower than 2 are raised to 2).
+	// Corresponds to the LSP setting key "minPrefixLength".
+	MinPrefixLen int
+}
+
+// defaultConfig returns a Config populated with sane defaults.
+func defaultConfig() Config {
+	return Config{MinPrefixLen: defaultMinPrefixLen}
+}
 
 // Server is the LSP server instance.
 type Server struct {
@@ -33,12 +50,17 @@ type Server struct {
 	// request-scoped context.
 	notifyMu sync.Mutex
 	notifier Notifier
+
+	// configMu guards config which may be updated by workspace/didChangeConfiguration.
+	configMu sync.RWMutex
+	config   Config
 }
 
 // New creates a Server.
 func New() *Server {
 	s := &Server{
-		docs: make(map[string]string),
+		docs:   make(map[string]string),
+		config: defaultConfig(),
 	}
 	s.handler = protocol.Handler{
 		Initialize:             s.initialize,
@@ -52,11 +74,12 @@ func New() *Server {
 		TextDocumentDefinition: s.textDocumentDefinition,
 		TextDocumentHover:      s.textDocumentHover,
 		TextDocumentReferences: s.textDocumentReferences,
-		TextDocumentDocumentSymbol: s.textDocumentDocumentSymbol,
-		WorkspaceSymbol:            s.workspaceSymbol,
-		TextDocumentRename:         s.textDocumentRename,
-		TextDocumentPrepareRename:  s.textDocumentPrepareRename,
-		TextDocumentCodeAction:     s.textDocumentCodeAction,
+		TextDocumentDocumentSymbol:       s.textDocumentDocumentSymbol,
+		WorkspaceSymbol:                  s.workspaceSymbol,
+		TextDocumentRename:               s.textDocumentRename,
+		TextDocumentPrepareRename:        s.textDocumentPrepareRename,
+		TextDocumentCodeAction:           s.textDocumentCodeAction,
+		WorkspaceDidChangeConfiguration:  s.workspaceDidChangeConfiguration,
 	}
 	return s
 }
@@ -73,6 +96,11 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 		s.rootURI = string(*params.RootURI)
 	} else if params.RootPath != nil {
 		s.rootURI = "file://" + *params.RootPath
+	}
+
+	// Apply any settings passed in initializationOptions.
+	if params.InitializationOptions != nil {
+		s.applySettings(params.InitializationOptions)
 	}
 
 	root, err := uriToPath(s.rootURI)
@@ -108,7 +136,11 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 				Save:      &protocol.SaveOptions{IncludeText: &trueVal},
 			},
 			CompletionProvider: &protocol.CompletionOptions{
-				TriggerCharacters: []string{"-", "_"},
+				// "_" triggers completion popup in editors after "pkg_" is typed.
+				// The "-" trigger is intentionally omitted: it would fire with
+				// prefix="" (0 chars), which is always below the minPrefixLength
+				// threshold and would produce an empty list.
+				TriggerCharacters: []string{"_"},
 			},
 			DefinitionProvider:         &trueVal,
 			HoverProvider:              &trueVal,
@@ -257,6 +289,73 @@ func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidClo
 		s.republishOpenFiles(n, filePath)
 	}
 	return nil
+}
+
+// workspaceDidChangeConfiguration handles the workspace/didChangeConfiguration
+// notification sent by editors when the user changes settings.
+func (s *Server) workspaceDidChangeConfiguration(_ *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
+	if params != nil {
+		s.applySettings(params.Settings)
+	}
+	return nil
+}
+
+// applySettings extracts configuration values from v (which may be a
+// map[string]any from JSON unmarshalling, or a json.RawMessage).
+// Settings are read from either the top-level key "minPrefixLength" or
+// the nested path "chiselReleasesLsp.minPrefixLength".
+func (s *Server) applySettings(v any) {
+	// Normalise: if it's a json.RawMessage or []byte, unmarshal first.
+	if raw, ok := v.(json.RawMessage); ok {
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err == nil {
+			v = m
+		}
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	// Support both flat "minPrefixLength" and namespaced "chiselReleasesLsp.minPrefixLength".
+	val, found := m["minPrefixLength"]
+	if !found {
+		if nested, ok := m["chiselReleasesLsp"].(map[string]any); ok {
+			val, found = nested["minPrefixLength"]
+		}
+	}
+	if !found {
+		return
+	}
+	n := toInt(val)
+	if n < defaultMinPrefixLen {
+		n = defaultMinPrefixLen
+	}
+	s.configMu.Lock()
+	s.config.MinPrefixLen = n
+	s.configMu.Unlock()
+}
+
+// minPrefixLen returns the current configured minimum prefix length.
+func (s *Server) minPrefixLen() int {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.config.MinPrefixLen
+}
+
+// toInt coerces common JSON number types (float64, int, int64) to int.
+func toInt(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	}
+	return 0
 }
 
 // storeNotifier caches a notification sender from ctx for use by background goroutines.

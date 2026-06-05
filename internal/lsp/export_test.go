@@ -158,3 +158,15 @@ func ExportCompletionPrefixAndRange(text string, line, char int) (string, protoc
 func ExportComputeDiagnostics(s *Server, filePath string) []protocol.Diagnostic {
 return s.computeDiagnostics(filePath)
 }
+
+// SetMinPrefixLen sets the minimum prefix length for completion for testing.
+func (s *Server) SetMinPrefixLen(n int) {
+s.configMu.Lock()
+s.config.MinPrefixLen = n
+s.configMu.Unlock()
+}
+
+// ExportApplySettings exposes applySettings for testing.
+func (s *Server) ExportApplySettings(v any) {
+s.applySettings(v)
+}

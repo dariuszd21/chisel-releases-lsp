@@ -147,6 +147,49 @@ internal/
 
 ---
 
+## Configuration
+
+The server reads configuration from the `initializationOptions` object sent by
+the editor during the LSP handshake, and updates settings at runtime via
+`workspace/didChangeConfiguration`.
+
+### Settings
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `minPrefixLength` | integer | `2` | Minimum number of characters the user must type in an `essential:` reference before completion items are offered.  The minimum accepted value is `2`; values below `2` are silently raised to `2`. |
+
+Settings can be provided either at the top level or nested under a
+`chiselReleasesLsp` key:
+
+```json
+// Flat (initializationOptions or settings root):
+{ "minPrefixLength": 3 }
+
+// Namespaced:
+{ "chiselReleasesLsp": { "minPrefixLength": 3 } }
+```
+
+#### Neovim (lspconfig)
+
+```lua
+require('lspconfig').chisel_releases_lsp.setup({
+  init_options = {
+    minPrefixLength = 3,  -- require 3 chars before showing completions
+  },
+})
+```
+
+#### VS Code (settings.json)
+
+```json
+{
+  "chiselReleasesLsp.minPrefixLength": 3
+}
+```
+
+---
+
 ## Known Limitations
 
 - **Character offsets use byte lengths, not UTF-16 code units.** The LSP specification requires character positions to be expressed in UTF-16 code units by default. `chisel-releases-lsp` currently uses byte lengths (`len(token)`). For ASCII-only package and slice names this makes no difference, but names containing multi-byte UTF-8 characters would produce off-by-one position errors in some editors.
