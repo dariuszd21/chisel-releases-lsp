@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -15,24 +16,18 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// SliceKey uniquely identifies a slice: package name + slice name.
-type SliceKey struct {
-	Package string
-	Slice   string
-}
-
 // IndexedSlice is a slice definition plus the path to its source file.
 type IndexedSlice struct {
-	File      string // absolute path to the .yaml file
-	Def       *parser.SliceDef
+	File         string // absolute path to the .yaml file
+	Def          *parser.SliceDef
 	PackageRange parser.Range // range of the `package:` value in the file
 }
 
 // Index holds the in-memory view of all slices in a chisel release.
 type Index struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
 	// slices maps pkg → slice-name → IndexedSlice
-	slices  map[string]map[string]*IndexedSlice
+	slices map[string]map[string]*IndexedSlice
 	// files maps absolute file path → *parser.SliceFile
 	files   map[string]*parser.SliceFile
 	watcher *fsnotify.Watcher
@@ -87,7 +82,7 @@ func (idx *Index) LookupSlice(pkg, slice string) *IndexedSlice {
 	return nil
 }
 
-// AllSliceRefs returns all known "pkg_slice" strings, sorted for stable output.
+// AllSliceRefs returns all known "pkg_slice" strings in alphabetical order.
 func (idx *Index) AllSliceRefs() []string {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
@@ -97,31 +92,8 @@ func (idx *Index) AllSliceRefs() []string {
 			refs = append(refs, pkg+"_"+sliceName)
 		}
 	}
+	sort.Strings(refs)
 	return refs
-}
-
-// PackageFile returns the parsed SliceFile for a given package name, or nil.
-func (idx *Index) PackageFile(pkg string) *parser.SliceFile {
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
-	for _, sf := range idx.files {
-		if sf.Package == pkg {
-			return sf
-		}
-	}
-	return nil
-}
-
-// FileForPackage returns the file path for a given package name, or "".
-func (idx *Index) FileForPackage(pkg string) string {
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
-	for path, sf := range idx.files {
-		if sf.Package == pkg {
-			return path
-		}
-	}
-	return ""
 }
 
 // AllFiles returns all currently indexed file paths.
@@ -147,6 +119,27 @@ func (idx *Index) FileSliceFile(absPath string) *parser.SliceFile {
 func (idx *Index) UpdateFile(absPath string, sf *parser.SliceFile) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+	idx.applySliceFile(absPath, sf)
+}
+
+// IndexFile (re-)parses and indexes a single file.
+func (idx *Index) IndexFile(absPath string) error {
+	sf, err := parser.ParseFile(absPath)
+	if err != nil {
+		// On parse error, remove stale data so diagnostics reflect the broken state.
+		idx.mu.Lock()
+		idx.removeFile(absPath)
+		idx.mu.Unlock()
+		return err
+	}
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	idx.applySliceFile(absPath, sf)
+	return nil
+}
+
+// applySliceFile replaces the index entries for absPath with sf. Caller must hold mu.
+func (idx *Index) applySliceFile(absPath string, sf *parser.SliceFile) {
 	idx.removeFile(absPath)
 	idx.files[absPath] = sf
 	if sf.Package == "" {
@@ -162,36 +155,6 @@ func (idx *Index) UpdateFile(absPath string, sf *parser.SliceFile) {
 			PackageRange: sf.PackageRange,
 		}
 	}
-}
-
-// IndexFile (re-)parses and indexes a single file.
-func (idx *Index) IndexFile(absPath string) error {
-	sf, err := parser.ParseFile(absPath)
-	if err != nil {
-		// On parse error, remove stale data so diagnostics reflect the broken state.
-		idx.mu.Lock()
-		idx.removeFile(absPath)
-		idx.mu.Unlock()
-		return err
-	}
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-	idx.removeFile(absPath)
-	idx.files[absPath] = sf
-	if sf.Package == "" {
-		return nil
-	}
-	if idx.slices[sf.Package] == nil {
-		idx.slices[sf.Package] = make(map[string]*IndexedSlice)
-	}
-	for name, sd := range sf.Slices {
-		idx.slices[sf.Package][name] = &IndexedSlice{
-			File:         absPath,
-			Def:          sd,
-			PackageRange: sf.PackageRange,
-		}
-	}
-	return nil
 }
 
 // removeFile removes all index entries associated with a file. Caller must hold mu.
@@ -262,3 +225,4 @@ func (idx *Index) watchLoop(slicesDir string) {
 		}
 	}
 }
+
