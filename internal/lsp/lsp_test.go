@@ -907,3 +907,214 @@ if params[0].URI != lsp.ExportFilePathToURI(opensslPath) {
 t.Errorf("expected openssl.yaml URI, got %s", params[0].URI)
 }
 }
+
+// --- textDocument/codeAction ---
+
+func TestCodeAction_UnknownRef_OffersRemove(t *testing.T) {
+	// foo.yaml references nonexistent_slice which doesn't exist in the index.
+	// computeDiagnostics should emit an unknown-slice-ref diagnostic; passing it
+	// back to computeCodeActions should produce a "Remove unknown reference" action
+	// that deletes the offending line.
+	fooContent := `package: foo
+slices:
+  bins:
+    essential:
+      - nonexistent_slice
+    contents:
+      /usr/bin/foo:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"foo.yaml": fooContent})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(fooPath, fooContent)
+
+	diags := srv.ExportComputeDiagnostics(fooPath)
+
+	// Find the unknown-ref diagnostic.
+	var refDiags []protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "unknown-slice-ref" {
+				refDiags = append(refDiags, d)
+			}
+		}
+	}
+	if len(refDiags) == 0 {
+		t.Fatalf("expected unknown-slice-ref diagnostic, got %v", diags)
+	}
+
+	actions := srv.ExportCodeAction(fooPath, refDiags)
+	if len(actions) == 0 {
+		t.Fatal("expected at least one code action")
+	}
+
+	found := false
+	for _, a := range actions {
+		if a.Title == "Remove unknown reference" {
+			found = true
+			// Verify the edit deletes the whole line.
+			if a.Edit == nil {
+				t.Error("code action has no Edit")
+				continue
+			}
+			uri := lsp.ExportFilePathToURI(fooPath)
+			edits := a.Edit.Changes[uri]
+			if len(edits) != 1 {
+				t.Errorf("expected 1 TextEdit, got %d", len(edits))
+				continue
+			}
+			if edits[0].NewText != "" {
+				t.Errorf("expected NewText to be empty (deletion), got %q", edits[0].NewText)
+			}
+			if edits[0].Range.Start.Character != 0 {
+				t.Errorf("edit range start character should be 0 (full line), got %d", edits[0].Range.Start.Character)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no 'Remove unknown reference' action found in: %v", actions)
+	}
+}
+
+func TestCodeAction_PackageMismatch_OffersFix(t *testing.T) {
+	// wrong.yaml declares package: wrong but the filename is "foo.yaml".
+	// The mismatch should trigger a "Fix package name to..." action.
+	fooContent := `package: wrong
+slices:
+  bins:
+    contents:
+      /usr/bin/foo:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"foo.yaml": fooContent})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(fooPath, fooContent)
+
+	diags := srv.ExportComputeDiagnostics(fooPath)
+
+	var mismatchDiags []protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "package-name-mismatch" {
+				mismatchDiags = append(mismatchDiags, d)
+			}
+		}
+	}
+	if len(mismatchDiags) == 0 {
+		t.Fatalf("expected package-name-mismatch diagnostic, got %v", diags)
+	}
+
+	actions := srv.ExportCodeAction(fooPath, mismatchDiags)
+	if len(actions) == 0 {
+		t.Fatal("expected at least one code action")
+	}
+
+	found := false
+	for _, a := range actions {
+		if strings.Contains(a.Title, "Fix package name") && strings.Contains(a.Title, "foo") {
+			found = true
+			if a.Edit == nil {
+				t.Error("code action has no Edit")
+				continue
+			}
+			uri := lsp.ExportFilePathToURI(fooPath)
+			edits := a.Edit.Changes[uri]
+			if len(edits) != 1 || edits[0].NewText != "foo" {
+				t.Errorf("expected NewText=%q, got edits=%v", "foo", edits)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no 'Fix package name to ...' action found, got: %v", actions)
+	}
+}
+
+func TestCodeAction_NoDiagnostics_ReturnsEmpty(t *testing.T) {
+	cleanContent := `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"libc6.yaml": cleanContent})
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(libc6Path, cleanContent)
+
+	actions := srv.ExportCodeAction(libc6Path, []protocol.Diagnostic{})
+	if len(actions) != 0 {
+		t.Errorf("expected no actions for empty diagnostics, got %v", actions)
+	}
+}
+
+func TestCodeAction_InvalidRef_OffersRemove(t *testing.T) {
+	// "badformat" has no underscore — invalid slice reference format.
+	fooContent := `package: foo
+slices:
+  bins:
+    essential:
+      - badformat
+    contents:
+      /usr/bin/foo:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"foo.yaml": fooContent})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(fooPath, fooContent)
+
+	diags := srv.ExportComputeDiagnostics(fooPath)
+
+	var invalidDiags []protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "invalid-slice-ref" {
+				invalidDiags = append(invalidDiags, d)
+			}
+		}
+	}
+	if len(invalidDiags) == 0 {
+		t.Fatalf("expected invalid-slice-ref diagnostic, got %v", diags)
+	}
+
+	actions := srv.ExportCodeAction(fooPath, invalidDiags)
+	found := false
+	for _, a := range actions {
+		if a.Title == "Remove invalid reference" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no 'Remove invalid reference' action found, got: %v", actions)
+	}
+}
+
+func TestCodeAction_AllDiagnosticsHaveCodes(t *testing.T) {
+	// Verify that every diagnostic emitted by computeDiagnostics has a Code set.
+	fooContent := `package: wrongname
+slices:
+  bins:
+    essential:
+      - nonexistent_slice
+      - badformat
+    contents:
+      relative/path:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"foo.yaml": fooContent})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	srv := lsp.NewWithIndex(idx)
+	diags := srv.ExportComputeDiagnostics(fooPath)
+
+	if len(diags) == 0 {
+		t.Fatal("expected diagnostics, got none")
+	}
+	for _, d := range diags {
+		if d.Code == nil {
+			t.Errorf("diagnostic missing Code: %q", d.Message)
+		}
+	}
+}

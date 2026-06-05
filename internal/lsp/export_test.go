@@ -130,3 +130,10 @@ func (s *Server) ExportRename(filePath string, line, char int, newName string) (
 		NewName: newName,
 	})
 }
+
+// ExportCodeAction calls computeCodeActions with the given file path and
+// client diagnostics, returning the resulting quick-fix actions.
+func (s *Server) ExportCodeAction(filePath string, clientDiags []protocol.Diagnostic) []protocol.CodeAction {
+	uri := filePathToURI(filePath)
+	return s.computeCodeActions(filePath, uri, clientDiags)
+}
