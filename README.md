@@ -12,11 +12,15 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 |---------|-----------|
 | **Slice completions** — suggest `<pkg>_<slice>` in `essential:` lists | `textDocument/completion` |
 | **Jump to definition** — go to the slice key in its `.yaml` file | `textDocument/definition` |
+| **Find references** — list all `essential:` entries that reference a slice | `textDocument/references` |
+| **Rename** — rename a slice across its definition and all references | `textDocument/rename` |
+| **Quick fixes** — remove unknown/invalid references; fix package name mismatches | `textDocument/codeAction` |
 | **Document symbols** — outline view showing the package and all its slices | `textDocument/documentSymbol` |
 | **Workspace symbols** — search all `pkg_slice` names across the release | `workspace/symbol` |
 | **Glob pattern validation** — flag invalid patterns in `contents:` | `textDocument/publishDiagnostics` |
 | **Slice collision detection** — warn when two packages claim the same path | `textDocument/publishDiagnostics` |
 | **Unknown reference warnings** — warn on `essential:` entries that don't exist | `textDocument/publishDiagnostics` |
+| **Package name check** — warn when `package:` value doesn't match the filename stem | `textDocument/publishDiagnostics` |
 | **Hover documentation** — show a slice's contents and essential dependencies | `textDocument/hover` |
 
 ---
@@ -24,13 +28,13 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 ## Installation
 
 ```bash
-go install github.com/canonical/chisel-releases-lsp/cmd/chisel-releases-lsp@latest
+go install github.com/dariuszd21/chisel-releases-lsp/cmd/chisel-releases-lsp@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/canonical/chisel-releases-lsp
+git clone https://github.com/dariuszd21/chisel-releases-lsp
 cd chisel-releases-lsp
 go build -o chisel-releases-lsp ./cmd/chisel-releases-lsp
 ```
@@ -79,10 +83,14 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
 - **Go to definition** resolves `<pkg>_<slice>` tokens to the exact line in `slices/<pkg>.yaml`.
 - **Document symbols** (`Ctrl+Shift+O` in most editors) shows a package/slice outline for the current file.
 - **Workspace symbols** (`Ctrl+T` / `@` in most editors) lets you fuzzy-search any `pkg_slice` name across the entire release.
+- **Find references** (`Shift+F12` or equivalent) lists every `essential:` entry that names a given slice, across all files.
+- **Rename** (`F2`) renames a slice key in its definition file and updates every `essential:` reference across the release.
 - **Diagnostics** are published on open, change, and save:
   - Invalid glob patterns in `contents:` paths.
   - Cross-package path collisions (two packages claiming the same concrete path).
-  - Unknown slice references in `essential:` lists.
+  - Unknown or malformed slice references in `essential:` lists.
+  - `package:` value that does not match the file's name stem (e.g. `openssl.yaml` must declare `package: openssl`).
+- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references and package name mismatches.
 - **Hover** renders a markdown summary of a slice's contents and its own essential dependencies.
 
 ---
@@ -147,7 +155,7 @@ internal/
 
 ## Roadmap
 
+- [x] Rename refactoring for slice names
 - [ ] Remote chisel-releases (pull from `canonical/chisel-releases` GitHub branches)
 - [ ] TCP/socket transport in addition to stdio
 - [ ] Schema validation for `chisel.yaml`
-- [ ] Rename refactoring for slice names
