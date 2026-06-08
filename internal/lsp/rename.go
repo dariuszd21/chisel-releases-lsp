@@ -45,9 +45,12 @@ func (s *Server) textDocumentPrepareRename(_ *glsp.Context, params *protocol.Pre
 		return nil, nil
 	}
 
-	// Return the range of the token so the editor pre-fills the rename box.
+	// Return the range and placeholder so the editor pre-fills the rename box.
 	r := tokenRange(text, line, char)
-	return toProtocolRange(r), nil
+	return protocol.RangeWithPlaceholder{
+		Range:       toProtocolRange(r),
+		Placeholder: token,
+	}, nil
 }
 
 // textDocumentRename renames a slice across all YAML files that reference it.

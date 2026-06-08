@@ -1212,6 +1212,74 @@ t.Errorf("definition: got %+v, want NewText=openssl_libs", defEdits)
 }
 }
 
+func TestPrepareRename_HyphenatedToken(t *testing.T) {
+// util-linux has a hyphenated package name and a hyphenated slice name.
+// The cursor should always resolve to the full "util-linux_file-system" token
+// regardless of where in the token the cursor is placed.
+content := `package: util-linux
+slices:
+  file-system:
+    essential:
+      - util-linux_file-system
+    contents:
+      /usr/bin/mount:
+`
+idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
+ulPath := filepath.Join(slicesDir, "util-linux.yaml")
+srv := lsp.NewWithIndex(idx)
+srv.SetDocForTest(ulPath, content)
+
+// Line 4 (0-based): "      - util-linux_file-system"
+// Cursor positions to try: at start of token (8), middle (15), near end (25).
+line := 4
+for _, char := range []int{8, 12, 20, 25} {
+result, err := srv.ExportPrepareRename(ulPath, line, char)
+if err != nil {
+t.Errorf("char=%d: unexpected error: %v", char, err)
+continue
+}
+rwp, ok := result.(protocol.RangeWithPlaceholder)
+if !ok {
+t.Errorf("char=%d: expected RangeWithPlaceholder, got %T: %v", char, result, result)
+continue
+}
+if rwp.Placeholder != "util-linux_file-system" {
+t.Errorf("char=%d: Placeholder = %q, want %q", char, rwp.Placeholder, "util-linux_file-system")
+}
+// The range must cover the full token.
+if rwp.Range.Start.Character != 8 || rwp.Range.End.Character != 30 {
+t.Errorf("char=%d: Range = %v, want Start.Char=8 End.Char=30", char, rwp.Range)
+}
+}
+}
+
+func TestPrepareRename_OnDefinition_HyphenatedSliceName(t *testing.T) {
+// Cursor on the "file-system:" definition key — should return the bare slice name.
+content := `package: util-linux
+slices:
+  file-system:
+    contents:
+      /usr/bin/mount:
+`
+idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
+ulPath := filepath.Join(slicesDir, "util-linux.yaml")
+srv := lsp.NewWithIndex(idx)
+srv.SetDocForTest(ulPath, content)
+
+// Line 2: "  file-system:"
+result, err := srv.ExportPrepareRename(ulPath, 2, 5)
+if err != nil {
+t.Fatalf("unexpected error: %v", err)
+}
+rwp, ok := result.(protocol.RangeWithPlaceholder)
+if !ok {
+t.Fatalf("expected RangeWithPlaceholder, got %T: %v", result, result)
+}
+if rwp.Placeholder != "file-system" {
+t.Errorf("Placeholder = %q, want %q", rwp.Placeholder, "file-system")
+}
+}
+
 // --- recordingNotifier test helper ---
 
 type recordingNotifier struct {

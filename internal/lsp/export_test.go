@@ -136,6 +136,17 @@ func (s *Server) ExportRename(filePath string, line, char int, newName string) (
 	})
 }
 
+// ExportPrepareRename calls textDocumentPrepareRename with the given params.
+func (s *Server) ExportPrepareRename(filePath string, line, char int) (any, error) {
+	uri := filePathToURI(filePath)
+	return s.textDocumentPrepareRename(nil, &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: uint32(line), Character: uint32(char)},
+		},
+	})
+}
+
 // ExportCodeAction calls computeCodeActions with the given file path and
 // client diagnostics, returning the resulting quick-fix actions.
 func (s *Server) ExportCodeAction(filePath string, clientDiags []protocol.Diagnostic) []protocol.CodeAction {

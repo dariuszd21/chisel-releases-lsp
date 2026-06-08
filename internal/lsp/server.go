@@ -147,7 +147,7 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 			ReferencesProvider:         &trueVal,
 			DocumentSymbolProvider:     &trueVal,
 			WorkspaceSymbolProvider:    &trueVal,
-			RenameProvider:             &trueVal,
+			RenameProvider:             protocol.RenameOptions{PrepareProvider: &trueVal},
 			CodeActionProvider: &protocol.CodeActionOptions{
 				CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
 			},
