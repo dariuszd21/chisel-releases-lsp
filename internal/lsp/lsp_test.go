@@ -1214,8 +1214,8 @@ t.Errorf("definition: got %+v, want NewText=openssl_libs", defEdits)
 
 func TestPrepareRename_HyphenatedToken(t *testing.T) {
 // util-linux has a hyphenated package name and a hyphenated slice name.
-// The cursor should always resolve to the full "util-linux_file-system" token
-// regardless of where in the token the cursor is placed.
+// prepareRename should return only the slice-name part as the range/placeholder
+// so the user edits "file-system", not the full "util-linux_file-system".
 content := `package: util-linux
 slices:
   file-system:
@@ -1230,7 +1230,8 @@ srv := lsp.NewWithIndex(idx)
 srv.SetDocForTest(ulPath, content)
 
 // Line 4 (0-based): "      - util-linux_file-system"
-// Cursor positions to try: at start of token (8), middle (15), near end (25).
+// "util-linux_" is chars 8-18, "file-system" is chars 19-29 (end=30).
+// Cursor positions within the full token (pkg part and slice part).
 line := 4
 for _, char := range []int{8, 12, 20, 25} {
 result, err := srv.ExportPrepareRename(ulPath, line, char)
@@ -1243,12 +1244,13 @@ if !ok {
 t.Errorf("char=%d: expected RangeWithPlaceholder, got %T: %v", char, result, result)
 continue
 }
-if rwp.Placeholder != "util-linux_file-system" {
-t.Errorf("char=%d: Placeholder = %q, want %q", char, rwp.Placeholder, "util-linux_file-system")
+// Placeholder is the slice name only, not the full reference.
+if rwp.Placeholder != "file-system" {
+t.Errorf("char=%d: Placeholder = %q, want %q", char, rwp.Placeholder, "file-system")
 }
-// The range must cover the full token.
-if rwp.Range.Start.Character != 8 || rwp.Range.End.Character != 30 {
-t.Errorf("char=%d: Range = %v, want Start.Char=8 End.Char=30", char, rwp.Range)
+// The range must cover only "file-system" (chars 19-30), not the full token.
+if rwp.Range.Start.Character != 19 || rwp.Range.End.Character != 30 {
+t.Errorf("char=%d: Range = %v, want Start.Char=19 End.Char=30", char, rwp.Range)
 }
 }
 }
@@ -1277,6 +1279,48 @@ t.Fatalf("expected RangeWithPlaceholder, got %T: %v", result, result)
 }
 if rwp.Placeholder != "file-system" {
 t.Errorf("Placeholder = %q, want %q", rwp.Placeholder, "file-system")
+}
+}
+
+func TestRename_FromEssential_NewSliceOnly(t *testing.T) {
+// Rename from an essential list entry by providing a bare new slice name.
+// prepareRename shows just "file-system" (not the full ref), so the user
+// types a bare slice name; the rename must produce the correct reference.
+content := `package: util-linux
+slices:
+  file-system:
+    essential:
+      - util-linux_file-system
+    contents:
+      /usr/bin/mount:
+`
+idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
+ulPath := filepath.Join(slicesDir, "util-linux.yaml")
+srv := lsp.NewWithIndex(idx)
+srv.SetDocForTest(ulPath, content)
+
+// Line 4: "      - util-linux_file-system", cursor anywhere in the token.
+edit, err := srv.ExportRename(ulPath, 4, 12, "new-system")
+if err != nil {
+t.Fatalf("unexpected error: %v", err)
+}
+if edit == nil {
+t.Fatal("expected non-nil WorkspaceEdit")
+}
+ulURI := lsp.ExportFilePathToURI(ulPath)
+edits := edit.Changes[ulURI]
+if len(edits) != 2 {
+t.Fatalf("expected 2 edits (definition + reference), got %d", len(edits))
+}
+texts := map[string]bool{}
+for _, e := range edits {
+texts[e.NewText] = true
+}
+if !texts["new-system"] {
+t.Errorf("expected definition edit NewText=%q, got edits: %+v", "new-system", edits)
+}
+if !texts["util-linux_new-system"] {
+t.Errorf("expected reference edit NewText=%q, got edits: %+v", "util-linux_new-system", edits)
 }
 }
 

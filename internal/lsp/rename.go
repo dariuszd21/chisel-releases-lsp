@@ -40,16 +40,24 @@ func (s *Server) textDocumentPrepareRename(_ *glsp.Context, params *protocol.Pre
 		return nil, nil
 	}
 
-	pkg, _ := resolveRefTarget(s, filePath, token)
+	pkg, sliceName := resolveRefTarget(s, filePath, token)
 	if pkg == "" {
 		return nil, nil
 	}
 
 	// Return the range and placeholder so the editor pre-fills the rename box.
+	// Use only the slice-name part (not the full pkg_slice token) so the user
+	// edits just "file-system", preventing double-prefix bugs when the new name
+	// doesn't start with the original package prefix.
 	r := tokenRange(text, line, char)
+	sliceNameRange := r
+	if strings.HasPrefix(token, pkg+"_") {
+		// Essential-ref context: skip past "pkg_" to the slice name.
+		sliceNameRange.Start.Character = r.Start.Character + len(pkg) + 1
+	}
 	return protocol.RangeWithPlaceholder{
-		Range:       toProtocolRange(r),
-		Placeholder: token,
+		Range:       toProtocolRange(sliceNameRange),
+		Placeholder: sliceName,
 	}, nil
 }
 
