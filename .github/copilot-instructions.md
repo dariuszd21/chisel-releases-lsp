@@ -21,7 +21,21 @@ snap run go test -run TestComputeDiagnostics_UnknownRef ./internal/lsp/...
 snap run go test -cover ./internal/lsp/...
 ```
 
-There is no linter configured. `snap run go build ./...` is the quickest sanity check.
+**Full CI check (run all three before committing):**
+
+```bash
+# 1. Formatting — must produce no output
+gofmt -l .
+
+# 2. Build + test
+snap run go build ./...
+snap run go test ./...
+
+# 3. Lint (golangci-lint v2.12.2 installed at ~/go/bin/golangci-lint)
+PATH="$PATH:/snap/bin" ~/go/bin/golangci-lint run ./...
+```
+
+This mirrors exactly what `.github/workflows/ci.yml` runs.
 
 ---
 
