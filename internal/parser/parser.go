@@ -167,7 +167,7 @@ func parseSliceDef(name string, nameRange Range, body *yaml.Node) (*SliceDef, er
 //
 // v1/v2 list:       v3 map:
 //   - pkg_slice       pkg_slice:
-//                     pkg_slice: {arch: amd64}
+//     pkg_slice: {arch: amd64}
 //
 // Arch constraints in v3 map values are silently ignored — the LSP indexes all
 // refs regardless of architecture so completion and references work on any target.

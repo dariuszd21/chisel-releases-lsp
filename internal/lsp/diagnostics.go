@@ -136,4 +136,3 @@ func collectEssentialRefs(sf *parser.SliceFile) []parser.EssentialRef {
 	}
 	return refs
 }
-

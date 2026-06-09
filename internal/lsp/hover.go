@@ -78,4 +78,3 @@ func renderSliceMarkdown(pkg, sliceName string, sd *parser.SliceDef) string {
 	}
 	return sb.String()
 }
-

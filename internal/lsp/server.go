@@ -63,23 +63,23 @@ func New() *Server {
 		config: defaultConfig(),
 	}
 	s.handler = protocol.Handler{
-		Initialize:             s.initialize,
-		Initialized:            s.initialized,
-		Shutdown:               s.shutdown,
-		TextDocumentDidOpen:    s.textDocumentDidOpen,
-		TextDocumentDidChange:  s.textDocumentDidChange,
-		TextDocumentDidSave:    s.textDocumentDidSave,
-		TextDocumentDidClose:   s.textDocumentDidClose,
-		TextDocumentCompletion: s.textDocumentCompletion,
-		TextDocumentDefinition: s.textDocumentDefinition,
-		TextDocumentHover:      s.textDocumentHover,
-		TextDocumentReferences: s.textDocumentReferences,
-		TextDocumentDocumentSymbol:       s.textDocumentDocumentSymbol,
-		WorkspaceSymbol:                  s.workspaceSymbol,
-		TextDocumentRename:               s.textDocumentRename,
-		TextDocumentPrepareRename:        s.textDocumentPrepareRename,
-		TextDocumentCodeAction:           s.textDocumentCodeAction,
-		WorkspaceDidChangeConfiguration:  s.workspaceDidChangeConfiguration,
+		Initialize:                      s.initialize,
+		Initialized:                     s.initialized,
+		Shutdown:                        s.shutdown,
+		TextDocumentDidOpen:             s.textDocumentDidOpen,
+		TextDocumentDidChange:           s.textDocumentDidChange,
+		TextDocumentDidSave:             s.textDocumentDidSave,
+		TextDocumentDidClose:            s.textDocumentDidClose,
+		TextDocumentCompletion:          s.textDocumentCompletion,
+		TextDocumentDefinition:          s.textDocumentDefinition,
+		TextDocumentHover:               s.textDocumentHover,
+		TextDocumentReferences:          s.textDocumentReferences,
+		TextDocumentDocumentSymbol:      s.textDocumentDocumentSymbol,
+		WorkspaceSymbol:                 s.workspaceSymbol,
+		TextDocumentRename:              s.textDocumentRename,
+		TextDocumentPrepareRename:       s.textDocumentPrepareRename,
+		TextDocumentCodeAction:          s.textDocumentCodeAction,
+		WorkspaceDidChangeConfiguration: s.workspaceDidChangeConfiguration,
 	}
 	return s
 }
@@ -142,12 +142,12 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 				// threshold and would produce an empty list.
 				TriggerCharacters: []string{"_"},
 			},
-			DefinitionProvider:         &trueVal,
-			HoverProvider:              &trueVal,
-			ReferencesProvider:         &trueVal,
-			DocumentSymbolProvider:     &trueVal,
-			WorkspaceSymbolProvider:    &trueVal,
-			RenameProvider:             protocol.RenameOptions{PrepareProvider: &trueVal},
+			DefinitionProvider:      &trueVal,
+			HoverProvider:           &trueVal,
+			ReferencesProvider:      &trueVal,
+			DocumentSymbolProvider:  &trueVal,
+			WorkspaceSymbolProvider: &trueVal,
+			RenameProvider:          protocol.RenameOptions{PrepareProvider: &trueVal},
 			CodeActionProvider: &protocol.CodeActionOptions{
 				CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
 			},
@@ -463,4 +463,3 @@ func (s *Server) republishOpenFiles(n Notifier, skipPath string) {
 		})
 	}
 }
-

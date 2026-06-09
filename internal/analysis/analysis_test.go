@@ -293,51 +293,51 @@ func TestCheckPackageName_EmptyPackage(t *testing.T) {
 // --- DetectDuplicateSlices ---
 
 func setupIndex(t *testing.T, files map[string]string) (*index.Index, string) {
-t.Helper()
-dir := t.TempDir()
-slicesDir := filepath.Join(dir, "slices")
-if err := os.Mkdir(slicesDir, 0755); err != nil {
-t.Fatal(err)
-}
-for name, content := range files {
-if err := os.WriteFile(filepath.Join(slicesDir, name), []byte(content), 0644); err != nil {
-t.Fatal(err)
-}
-}
-idx, err := index.New(dir, nil, nil)
-if err != nil {
-t.Fatal(err)
-}
-t.Cleanup(func() { idx.Close() })
-return idx, slicesDir
+	t.Helper()
+	dir := t.TempDir()
+	slicesDir := filepath.Join(dir, "slices")
+	if err := os.Mkdir(slicesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(slicesDir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idx, err := index.New(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { idx.Close() })
+	return idx, slicesDir
 }
 
 func TestDetectDuplicateSlices_NoDuplicates(t *testing.T) {
-idx, _ := setupIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, _ := setupIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     contents:
       /usr/bin/openssl:
 `,
-})
-dups := analysis.DetectDuplicateSlices(idx)
-if len(dups) != 0 {
-t.Errorf("expected no duplicates, got: %v", dups)
-}
+	})
+	dups := analysis.DetectDuplicateSlices(idx)
+	if len(dups) != 0 {
+		t.Errorf("expected no duplicates, got: %v", dups)
+	}
 }
 
 func TestDetectDuplicateSlices_Detected(t *testing.T) {
-// Two files with the same package name and overlapping slice names.
-// (This would also trigger CheckPackageName on one of them.)
-idx, slicesDir := setupIndex(t, map[string]string{
-"openssl.yaml": `package: openssl
+	// Two files with the same package name and overlapping slice names.
+	// (This would also trigger CheckPackageName on one of them.)
+	idx, slicesDir := setupIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     contents:
@@ -346,38 +346,38 @@ slices:
     contents:
       /etc/ssl/openssl.cnf:
 `,
-"openssl-extra.yaml": `package: openssl
+		"openssl-extra.yaml": `package: openssl
 slices:
   bins:
     contents:
       /usr/bin/c_rehash:
 `,
-})
+	})
 
-dups := analysis.DetectDuplicateSlices(idx)
-if len(dups) != 1 {
-t.Fatalf("expected 1 duplicate, got %d: %v", len(dups), dups)
-}
-d := dups[0]
-if d.Pkg != "openssl" || d.SliceName != "bins" {
-t.Errorf("expected openssl:bins duplicate, got %q:%q", d.Pkg, d.SliceName)
-}
-// Both files must be represented.
-files := map[string]bool{d.File1: true, d.File2: true}
-if !files[filepath.Join(slicesDir, "openssl.yaml")] || !files[filepath.Join(slicesDir, "openssl-extra.yaml")] {
-t.Errorf("duplicate files: got %q and %q", d.File1, d.File2)
-}
-// Ranges must be non-zero (pointing at the slice name key).
-if d.Range1.Start.Line == 0 && d.Range1.Start.Character == 0 &&
-d.Range1.End.Line == 0 && d.Range1.End.Character == 0 {
-t.Error("Range1 is zero — expected it to point at the slice name key")
-}
+	dups := analysis.DetectDuplicateSlices(idx)
+	if len(dups) != 1 {
+		t.Fatalf("expected 1 duplicate, got %d: %v", len(dups), dups)
+	}
+	d := dups[0]
+	if d.Pkg != "openssl" || d.SliceName != "bins" {
+		t.Errorf("expected openssl:bins duplicate, got %q:%q", d.Pkg, d.SliceName)
+	}
+	// Both files must be represented.
+	files := map[string]bool{d.File1: true, d.File2: true}
+	if !files[filepath.Join(slicesDir, "openssl.yaml")] || !files[filepath.Join(slicesDir, "openssl-extra.yaml")] {
+		t.Errorf("duplicate files: got %q and %q", d.File1, d.File2)
+	}
+	// Ranges must be non-zero (pointing at the slice name key).
+	if d.Range1.Start.Line == 0 && d.Range1.Start.Character == 0 &&
+		d.Range1.End.Line == 0 && d.Range1.End.Character == 0 {
+		t.Error("Range1 is zero — expected it to point at the slice name key")
+	}
 }
 
 func TestDetectDuplicateSlices_DeterministicOrder(t *testing.T) {
-// Multiple duplicates should be sorted by Pkg then SliceName.
-idx, _ := setupIndex(t, map[string]string{
-"a.yaml": `package: a
+	// Multiple duplicates should be sorted by Pkg then SliceName.
+	idx, _ := setupIndex(t, map[string]string{
+		"a.yaml": `package: a
 slices:
   z:
     contents:
@@ -386,7 +386,7 @@ slices:
     contents:
       /usr/a:
 `,
-"b.yaml": `package: a
+		"b.yaml": `package: a
 slices:
   z:
     contents:
@@ -395,12 +395,12 @@ slices:
     contents:
       /usr/a2:
 `,
-})
-dups := analysis.DetectDuplicateSlices(idx)
-if len(dups) != 2 {
-t.Fatalf("expected 2 duplicates, got %d: %v", len(dups), dups)
-}
-if dups[0].SliceName > dups[1].SliceName {
-t.Errorf("expected sorted by SliceName, got [%s, %s]", dups[0].SliceName, dups[1].SliceName)
-}
+	})
+	dups := analysis.DetectDuplicateSlices(idx)
+	if len(dups) != 2 {
+		t.Fatalf("expected 2 duplicates, got %d: %v", len(dups), dups)
+	}
+	if dups[0].SliceName > dups[1].SliceName {
+		t.Errorf("expected sorted by SliceName, got [%s, %s]", dups[0].SliceName, dups[1].SliceName)
+	}
 }

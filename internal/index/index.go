@@ -274,4 +274,3 @@ func (idx *Index) watchLoop(slicesDir string) {
 		}
 	}
 }
-

@@ -115,13 +115,14 @@ func TestIsInsideEssential_V3PartialKey(t *testing.T) {
 
 // completionText is the document content used by completion tests.
 // Line offsets (0-based):
-//   0: package: foo
-//   1: slices:
-//   2:   bins:
-//   3:     essential:
-//   4:       - libc6_libs       ← existing entry
-//   5:     contents:
-//   6:       /usr/bin/foo:
+//
+//	0: package: foo
+//	1: slices:
+//	2:   bins:
+//	3:     essential:
+//	4:       - libc6_libs       ← existing entry
+//	5:     contents:
+//	6:       /usr/bin/foo:
 const completionText = `package: foo
 slices:
   bins:
@@ -752,88 +753,88 @@ slices:
 }
 
 func TestDidClose_RevertsIndexToDisk(t *testing.T) {
-// Set up a real on-disk release with one package.
-dir := t.TempDir()
-slicesDir := filepath.Join(dir, "slices")
-if err := os.MkdirAll(slicesDir, 0755); err != nil {
-t.Fatal(err)
-}
-diskContent := `package: libc6
+	// Set up a real on-disk release with one package.
+	dir := t.TempDir()
+	slicesDir := filepath.Join(dir, "slices")
+	if err := os.MkdirAll(slicesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	diskContent := `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `
-filePath := filepath.Join(slicesDir, "libc6.yaml")
-if err := os.WriteFile(filePath, []byte(diskContent), 0644); err != nil {
-t.Fatal(err)
-}
+	filePath := filepath.Join(slicesDir, "libc6.yaml")
+	if err := os.WriteFile(filePath, []byte(diskContent), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-idx, err := index.New(dir, nil, nil)
-if err != nil {
-t.Fatal(err)
-}
-defer idx.Close()
+	idx, err := index.New(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
 
-// Simulate an unsaved edit: inject an extra slice into the index.
-editedContent := diskContent + "  injected:\n    contents:\n      /tmp/evil:\n"
-editedSF, err := parser.ParseBytes([]byte(editedContent))
-if err != nil {
-t.Fatal(err)
-}
-idx.UpdateFile(filePath, editedSF)
+	// Simulate an unsaved edit: inject an extra slice into the index.
+	editedContent := diskContent + "  injected:\n    contents:\n      /tmp/evil:\n"
+	editedSF, err := parser.ParseBytes([]byte(editedContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx.UpdateFile(filePath, editedSF)
 
-// Verify the injected slice is visible before close.
-refs := idx.AllSliceRefs()
-found := false
-for _, r := range refs {
-if r == "libc6_injected" {
-found = true
-}
-}
-if !found {
-t.Fatalf("expected libc6_injected in index before close, got: %v", refs)
-}
+	// Verify the injected slice is visible before close.
+	refs := idx.AllSliceRefs()
+	found := false
+	for _, r := range refs {
+		if r == "libc6_injected" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected libc6_injected in index before close, got: %v", refs)
+	}
 
-// Simulate textDocumentDidClose by reverting the index to disk.
-srv := lsp.NewWithIndex(idx)
-if err := srv.ExportRevertToDisk(filePath); err != nil {
-t.Fatalf("ExportRevertToDisk: %v", err)
-}
+	// Simulate textDocumentDidClose by reverting the index to disk.
+	srv := lsp.NewWithIndex(idx)
+	if err := srv.ExportRevertToDisk(filePath); err != nil {
+		t.Fatalf("ExportRevertToDisk: %v", err)
+	}
 
-// Verify the injected slice is gone after revert.
-refs = idx.AllSliceRefs()
-for _, r := range refs {
-if r == "libc6_injected" {
-t.Errorf("libc6_injected still in index after close, refs: %v", refs)
-}
-}
+	// Verify the injected slice is gone after revert.
+	refs = idx.AllSliceRefs()
+	for _, r := range refs {
+		if r == "libc6_injected" {
+			t.Errorf("libc6_injected still in index after close, refs: %v", refs)
+		}
+	}
 
-// The legitimate slice should still be there.
-found = false
-for _, r := range refs {
-if r == "libc6_libs" {
-found = true
-}
-}
-if !found {
-t.Errorf("libc6_libs missing after revert, refs: %v", refs)
-}
+	// The legitimate slice should still be there.
+	found = false
+	for _, r := range refs {
+		if r == "libc6_libs" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("libc6_libs missing after revert, refs: %v", refs)
+	}
 }
 
 // --- textDocument/references ---
 
 func TestReferences_FromEssentialEntry(t *testing.T) {
-// openssl.yaml has "- libc6_libs" at a known line.
-// Placing the cursor on that token should return a reference location.
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	// openssl.yaml has "- libc6_libs" at a known line.
+	// Placing the cursor on that token should return a reference location.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -841,7 +842,7 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-"curl.yaml": `package: curl
+		"curl.yaml": `package: curl
 slices:
   bins:
     essential:
@@ -850,12 +851,12 @@ slices:
     contents:
       /usr/bin/curl:
 `,
-})
+	})
 
-opensslPath := filepath.Join(slicesDir, "openssl.yaml")
-// Line 4 (0-based) is "      - libc6_libs"
-srv := lsp.NewWithIndex(idx)
-srv.SetDocForTest(opensslPath, `package: openssl
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	// Line 4 (0-based) is "      - libc6_libs"
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(opensslPath, `package: openssl
 slices:
   bins:
     essential:
@@ -863,26 +864,26 @@ slices:
     contents:
       /usr/bin/openssl:
 `)
-locs, err := srv.ExportReferences(opensslPath, 4, 10)
-if err != nil {
-t.Fatal(err)
-}
-if len(locs) != 2 {
-t.Fatalf("expected 2 references to libc6_libs, got %d: %v", len(locs), locs)
-}
+	locs, err := srv.ExportReferences(opensslPath, 4, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(locs) != 2 {
+		t.Fatalf("expected 2 references to libc6_libs, got %d: %v", len(locs), locs)
+	}
 }
 
 func TestReferences_FromSliceDefinition(t *testing.T) {
-// Placing the cursor on the "libs:" key in libc6.yaml should find references
-// to libc6_libs across all files.
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	// Placing the cursor on the "libs:" key in libc6.yaml should find references
+	// to libc6_libs across all files.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -890,43 +891,43 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-})
+	})
 
-libc6Path := filepath.Join(slicesDir, "libc6.yaml")
-// Line 2 (0-based) is "  libs:"
-srv := lsp.NewWithIndex(idx)
-locs, err := srv.ExportReferences(libc6Path, 2, 3)
-if err != nil {
-t.Fatal(err)
-}
-if len(locs) != 1 {
-t.Fatalf("expected 1 reference to libc6_libs from definition, got %d: %v", len(locs), locs)
-}
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	// Line 2 (0-based) is "  libs:"
+	srv := lsp.NewWithIndex(idx)
+	locs, err := srv.ExportReferences(libc6Path, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(locs) != 1 {
+		t.Fatalf("expected 1 reference to libc6_libs from definition, got %d: %v", len(locs), locs)
+	}
 }
 
 func TestReferences_NoResults(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   copyright:
     contents:
       /usr/share/doc/libc6/copyright:
 `,
-})
+	})
 
-libc6Path := filepath.Join(slicesDir, "libc6.yaml")
-srv := lsp.NewWithIndex(idx)
-// Line 2 is "  copyright:" — nobody externally references libc6_copyright,
-// so the fallback returns the definition itself (1 location).
-locs, err := srv.ExportReferences(libc6Path, 2, 3)
-if err != nil {
-t.Fatal(err)
-}
-// Fallback: the definition location is returned so the user always gets
-// at least one result when calling Find References on a defined slice.
-if len(locs) != 1 {
-t.Errorf("expected 1 location (definition fallback), got %d: %v", len(locs), locs)
-}
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	srv := lsp.NewWithIndex(idx)
+	// Line 2 is "  copyright:" — nobody externally references libc6_copyright,
+	// so the fallback returns the definition itself (1 location).
+	locs, err := srv.ExportReferences(libc6Path, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fallback: the definition location is returned so the user always gets
+	// at least one result when calling Find References on a defined slice.
+	if len(locs) != 1 {
+		t.Errorf("expected 1 location (definition fallback), got %d: %v", len(locs), locs)
+	}
 }
 
 func TestReferences_IncludeDeclaration(t *testing.T) {
@@ -1081,16 +1082,16 @@ slices:
 // --- textDocument/rename ---
 
 func TestRename_FromEssentialRef(t *testing.T) {
-// openssl.yaml has "- libc6_libs". Rename libc6_libs → libc6_shared_libs
-// from that essential entry. The definition in libc6.yaml and the reference
-// in openssl.yaml should both be updated.
-libc6Content := `package: libc6
+	// openssl.yaml has "- libc6_libs". Rename libc6_libs → libc6_shared_libs
+	// from that essential entry. The definition in libc6.yaml and the reference
+	// in openssl.yaml should both be updated.
+	libc6Content := `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `
-opensslContent := `package: openssl
+	opensslContent := `package: openssl
 slices:
   bins:
     essential:
@@ -1098,53 +1099,53 @@ slices:
     contents:
       /usr/bin/openssl:
 `
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml":   libc6Content,
-"openssl.yaml": opensslContent,
-})
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml":   libc6Content,
+		"openssl.yaml": opensslContent,
+	})
 
-libc6Path := filepath.Join(slicesDir, "libc6.yaml")
-opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
 
-srv := lsp.NewWithIndex(idx)
-srv.SetDocForTest(opensslPath, opensslContent)
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(opensslPath, opensslContent)
 
-// Line 4 (0-based) in openssl.yaml is "      - libc6_libs"
-edit, err := srv.ExportRename(opensslPath, 4, 10, "libc6_shared_libs")
-if err != nil {
-t.Fatal(err)
-}
-if edit == nil {
-t.Fatal("expected non-nil WorkspaceEdit")
-}
+	// Line 4 (0-based) in openssl.yaml is "      - libc6_libs"
+	edit, err := srv.ExportRename(opensslPath, 4, 10, "libc6_shared_libs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edit == nil {
+		t.Fatal("expected non-nil WorkspaceEdit")
+	}
 
-libc6URI := lsp.ExportFilePathToURI(libc6Path)
-opensslURI := lsp.ExportFilePathToURI(opensslPath)
+	libc6URI := lsp.ExportFilePathToURI(libc6Path)
+	opensslURI := lsp.ExportFilePathToURI(opensslPath)
 
-defEdits := edit.Changes[libc6URI]
-if len(defEdits) != 1 {
-t.Errorf("expected 1 edit in libc6.yaml (definition), got %d", len(defEdits))
-} else if defEdits[0].NewText != "shared_libs" {
-t.Errorf("definition edit NewText: got %q, want %q", defEdits[0].NewText, "shared_libs")
-}
+	defEdits := edit.Changes[libc6URI]
+	if len(defEdits) != 1 {
+		t.Errorf("expected 1 edit in libc6.yaml (definition), got %d", len(defEdits))
+	} else if defEdits[0].NewText != "shared_libs" {
+		t.Errorf("definition edit NewText: got %q, want %q", defEdits[0].NewText, "shared_libs")
+	}
 
-refEdits := edit.Changes[opensslURI]
-if len(refEdits) != 1 {
-t.Errorf("expected 1 edit in openssl.yaml (reference), got %d", len(refEdits))
-} else if refEdits[0].NewText != "libc6_shared_libs" {
-t.Errorf("reference edit NewText: got %q, want %q", refEdits[0].NewText, "libc6_shared_libs")
-}
+	refEdits := edit.Changes[opensslURI]
+	if len(refEdits) != 1 {
+		t.Errorf("expected 1 edit in openssl.yaml (reference), got %d", len(refEdits))
+	} else if refEdits[0].NewText != "libc6_shared_libs" {
+		t.Errorf("reference edit NewText: got %q, want %q", refEdits[0].NewText, "libc6_shared_libs")
+	}
 }
 
 func TestRename_FromDefinition_BareNewName(t *testing.T) {
-// Cursor on the "libs:" definition key; user types bare "shared_libs".
-libc6Content := `package: libc6
+	// Cursor on the "libs:" definition key; user types bare "shared_libs".
+	libc6Content := `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `
-opensslContent := `package: openssl
+	opensslContent := `package: openssl
 slices:
   bins:
     essential:
@@ -1152,71 +1153,71 @@ slices:
     contents:
       /usr/bin/openssl:
 `
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml":   libc6Content,
-"openssl.yaml": opensslContent,
-})
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml":   libc6Content,
+		"openssl.yaml": opensslContent,
+	})
 
-libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
 
-srv := lsp.NewWithIndex(idx)
-// Line 2 (0-based) in libc6.yaml is "  libs:"
-edit, err := srv.ExportRename(libc6Path, 2, 3, "shared_libs")
-if err != nil {
-t.Fatal(err)
-}
-if edit == nil {
-t.Fatal("expected non-nil WorkspaceEdit")
-}
+	srv := lsp.NewWithIndex(idx)
+	// Line 2 (0-based) in libc6.yaml is "  libs:"
+	edit, err := srv.ExportRename(libc6Path, 2, 3, "shared_libs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edit == nil {
+		t.Fatal("expected non-nil WorkspaceEdit")
+	}
 
-libc6URI := lsp.ExportFilePathToURI(libc6Path)
-opensslURI := lsp.ExportFilePathToURI(filepath.Join(slicesDir, "openssl.yaml"))
+	libc6URI := lsp.ExportFilePathToURI(libc6Path)
+	opensslURI := lsp.ExportFilePathToURI(filepath.Join(slicesDir, "openssl.yaml"))
 
-defEdits := edit.Changes[libc6URI]
-if len(defEdits) != 1 || defEdits[0].NewText != "shared_libs" {
-t.Errorf("definition: got %+v, want NewText=shared_libs", defEdits)
-}
+	defEdits := edit.Changes[libc6URI]
+	if len(defEdits) != 1 || defEdits[0].NewText != "shared_libs" {
+		t.Errorf("definition: got %+v, want NewText=shared_libs", defEdits)
+	}
 
-refEdits := edit.Changes[opensslURI]
-if len(refEdits) != 1 || refEdits[0].NewText != "libc6_shared_libs" {
-t.Errorf("reference: got %+v, want NewText=libc6_shared_libs", refEdits)
-}
+	refEdits := edit.Changes[opensslURI]
+	if len(refEdits) != 1 || refEdits[0].NewText != "libc6_shared_libs" {
+		t.Errorf("reference: got %+v, want NewText=libc6_shared_libs", refEdits)
+	}
 }
 
 func TestRename_NewNameWithoutPackagePrefix(t *testing.T) {
-// New name "openssl_libs" has no "libc6_" prefix, so it is used as-is
-// as the bare slice name, resulting in definition = "openssl_libs" and
-// essential refs = "libc6_openssl_libs".
-content := `package: libc6
+	// New name "openssl_libs" has no "libc6_" prefix, so it is used as-is
+	// as the bare slice name, resulting in definition = "openssl_libs" and
+	// essential refs = "libc6_openssl_libs".
+	content := `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `
-idx, slicesDir := setupLSPIndex(t, map[string]string{"libc6.yaml": content})
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"libc6.yaml": content})
 
-srv := lsp.NewWithIndex(idx)
-libc6Path := filepath.Join(slicesDir, "libc6.yaml")
-// Line 2 is "  libs:" — cursor on definition
-edit, err := srv.ExportRename(libc6Path, 2, 3, "openssl_libs")
-if err != nil {
-t.Fatal(err)
-}
-if edit == nil {
-t.Fatal("expected non-nil WorkspaceEdit")
-}
-libc6URI := lsp.ExportFilePathToURI(libc6Path)
-defEdits := edit.Changes[libc6URI]
-if len(defEdits) != 1 || defEdits[0].NewText != "openssl_libs" {
-t.Errorf("definition: got %+v, want NewText=openssl_libs", defEdits)
-}
+	srv := lsp.NewWithIndex(idx)
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	// Line 2 is "  libs:" — cursor on definition
+	edit, err := srv.ExportRename(libc6Path, 2, 3, "openssl_libs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edit == nil {
+		t.Fatal("expected non-nil WorkspaceEdit")
+	}
+	libc6URI := lsp.ExportFilePathToURI(libc6Path)
+	defEdits := edit.Changes[libc6URI]
+	if len(defEdits) != 1 || defEdits[0].NewText != "openssl_libs" {
+		t.Errorf("definition: got %+v, want NewText=openssl_libs", defEdits)
+	}
 }
 
 func TestPrepareRename_HyphenatedToken(t *testing.T) {
-// util-linux has a hyphenated package name and a hyphenated slice name.
-// prepareRename should return only the slice-name part as the range/placeholder
-// so the user edits "file-system", not the full "util-linux_file-system".
-content := `package: util-linux
+	// util-linux has a hyphenated package name and a hyphenated slice name.
+	// prepareRename should return only the slice-name part as the range/placeholder
+	// so the user edits "file-system", not the full "util-linux_file-system".
+	content := `package: util-linux
 slices:
   file-system:
     essential:
@@ -1224,69 +1225,69 @@ slices:
     contents:
       /usr/bin/mount:
 `
-idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
-ulPath := filepath.Join(slicesDir, "util-linux.yaml")
-srv := lsp.NewWithIndex(idx)
-srv.SetDocForTest(ulPath, content)
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
+	ulPath := filepath.Join(slicesDir, "util-linux.yaml")
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(ulPath, content)
 
-// Line 4 (0-based): "      - util-linux_file-system"
-// "util-linux_" is chars 8-18, "file-system" is chars 19-29 (end=30).
-// Cursor positions within the full token (pkg part and slice part).
-line := 4
-for _, char := range []int{8, 12, 20, 25} {
-result, err := srv.ExportPrepareRename(ulPath, line, char)
-if err != nil {
-t.Errorf("char=%d: unexpected error: %v", char, err)
-continue
-}
-rwp, ok := result.(protocol.RangeWithPlaceholder)
-if !ok {
-t.Errorf("char=%d: expected RangeWithPlaceholder, got %T: %v", char, result, result)
-continue
-}
-// Placeholder is the slice name only, not the full reference.
-if rwp.Placeholder != "file-system" {
-t.Errorf("char=%d: Placeholder = %q, want %q", char, rwp.Placeholder, "file-system")
-}
-// The range must cover only "file-system" (chars 19-30), not the full token.
-if rwp.Range.Start.Character != 19 || rwp.Range.End.Character != 30 {
-t.Errorf("char=%d: Range = %v, want Start.Char=19 End.Char=30", char, rwp.Range)
-}
-}
+	// Line 4 (0-based): "      - util-linux_file-system"
+	// "util-linux_" is chars 8-18, "file-system" is chars 19-29 (end=30).
+	// Cursor positions within the full token (pkg part and slice part).
+	line := 4
+	for _, char := range []int{8, 12, 20, 25} {
+		result, err := srv.ExportPrepareRename(ulPath, line, char)
+		if err != nil {
+			t.Errorf("char=%d: unexpected error: %v", char, err)
+			continue
+		}
+		rwp, ok := result.(protocol.RangeWithPlaceholder)
+		if !ok {
+			t.Errorf("char=%d: expected RangeWithPlaceholder, got %T: %v", char, result, result)
+			continue
+		}
+		// Placeholder is the slice name only, not the full reference.
+		if rwp.Placeholder != "file-system" {
+			t.Errorf("char=%d: Placeholder = %q, want %q", char, rwp.Placeholder, "file-system")
+		}
+		// The range must cover only "file-system" (chars 19-30), not the full token.
+		if rwp.Range.Start.Character != 19 || rwp.Range.End.Character != 30 {
+			t.Errorf("char=%d: Range = %v, want Start.Char=19 End.Char=30", char, rwp.Range)
+		}
+	}
 }
 
 func TestPrepareRename_OnDefinition_HyphenatedSliceName(t *testing.T) {
-// Cursor on the "file-system:" definition key — should return the bare slice name.
-content := `package: util-linux
+	// Cursor on the "file-system:" definition key — should return the bare slice name.
+	content := `package: util-linux
 slices:
   file-system:
     contents:
       /usr/bin/mount:
 `
-idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
-ulPath := filepath.Join(slicesDir, "util-linux.yaml")
-srv := lsp.NewWithIndex(idx)
-srv.SetDocForTest(ulPath, content)
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
+	ulPath := filepath.Join(slicesDir, "util-linux.yaml")
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(ulPath, content)
 
-// Line 2: "  file-system:"
-result, err := srv.ExportPrepareRename(ulPath, 2, 5)
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-rwp, ok := result.(protocol.RangeWithPlaceholder)
-if !ok {
-t.Fatalf("expected RangeWithPlaceholder, got %T: %v", result, result)
-}
-if rwp.Placeholder != "file-system" {
-t.Errorf("Placeholder = %q, want %q", rwp.Placeholder, "file-system")
-}
+	// Line 2: "  file-system:"
+	result, err := srv.ExportPrepareRename(ulPath, 2, 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rwp, ok := result.(protocol.RangeWithPlaceholder)
+	if !ok {
+		t.Fatalf("expected RangeWithPlaceholder, got %T: %v", result, result)
+	}
+	if rwp.Placeholder != "file-system" {
+		t.Errorf("Placeholder = %q, want %q", rwp.Placeholder, "file-system")
+	}
 }
 
 func TestRename_FromEssential_NewSliceOnly(t *testing.T) {
-// Rename from an essential list entry by providing a bare new slice name.
-// prepareRename shows just "file-system" (not the full ref), so the user
-// types a bare slice name; the rename must produce the correct reference.
-content := `package: util-linux
+	// Rename from an essential list entry by providing a bare new slice name.
+	// prepareRename shows just "file-system" (not the full ref), so the user
+	// types a bare slice name; the rename must produce the correct reference.
+	content := `package: util-linux
 slices:
   file-system:
     essential:
@@ -1294,154 +1295,154 @@ slices:
     contents:
       /usr/bin/mount:
 `
-idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
-ulPath := filepath.Join(slicesDir, "util-linux.yaml")
-srv := lsp.NewWithIndex(idx)
-srv.SetDocForTest(ulPath, content)
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"util-linux.yaml": content})
+	ulPath := filepath.Join(slicesDir, "util-linux.yaml")
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(ulPath, content)
 
-// Line 4: "      - util-linux_file-system", cursor anywhere in the token.
-edit, err := srv.ExportRename(ulPath, 4, 12, "new-system")
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-if edit == nil {
-t.Fatal("expected non-nil WorkspaceEdit")
-}
-ulURI := lsp.ExportFilePathToURI(ulPath)
-edits := edit.Changes[ulURI]
-if len(edits) != 2 {
-t.Fatalf("expected 2 edits (definition + reference), got %d", len(edits))
-}
-texts := map[string]bool{}
-for _, e := range edits {
-texts[e.NewText] = true
-}
-if !texts["new-system"] {
-t.Errorf("expected definition edit NewText=%q, got edits: %+v", "new-system", edits)
-}
-if !texts["util-linux_new-system"] {
-t.Errorf("expected reference edit NewText=%q, got edits: %+v", "util-linux_new-system", edits)
-}
+	// Line 4: "      - util-linux_file-system", cursor anywhere in the token.
+	edit, err := srv.ExportRename(ulPath, 4, 12, "new-system")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if edit == nil {
+		t.Fatal("expected non-nil WorkspaceEdit")
+	}
+	ulURI := lsp.ExportFilePathToURI(ulPath)
+	edits := edit.Changes[ulURI]
+	if len(edits) != 2 {
+		t.Fatalf("expected 2 edits (definition + reference), got %d", len(edits))
+	}
+	texts := map[string]bool{}
+	for _, e := range edits {
+		texts[e.NewText] = true
+	}
+	if !texts["new-system"] {
+		t.Errorf("expected definition edit NewText=%q, got edits: %+v", "new-system", edits)
+	}
+	if !texts["util-linux_new-system"] {
+		t.Errorf("expected reference edit NewText=%q, got edits: %+v", "util-linux_new-system", edits)
+	}
 }
 
 // --- recordingNotifier test helper ---
 
 type recordingNotifier struct {
-calls []notifyCall
+	calls []notifyCall
 }
 
 type notifyCall struct {
-method string
-params any
+	method string
+	params any
 }
 
 func (r *recordingNotifier) Notify(method string, params any) {
-r.calls = append(r.calls, notifyCall{method, params})
+	r.calls = append(r.calls, notifyCall{method, params})
 }
 
 func (r *recordingNotifier) diagParams() []protocol.PublishDiagnosticsParams {
-var out []protocol.PublishDiagnosticsParams
-for _, c := range r.calls {
-if c.method == "textDocument/publishDiagnostics" {
-if p, ok := c.params.(protocol.PublishDiagnosticsParams); ok {
-out = append(out, p)
-}
-}
-}
-return out
+	var out []protocol.PublishDiagnosticsParams
+	for _, c := range r.calls {
+		if c.method == "textDocument/publishDiagnostics" {
+			if p, ok := c.params.(protocol.PublishDiagnosticsParams); ok {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
 }
 
 // --- reindexAndPublish tests ---
 
 func TestReindexAndPublish_ParseError(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-})
+	})
 
-srv := lsp.NewWithIndex(idx)
-n := &recordingNotifier{}
-badContent := []byte("package: libc6\nslices: [\ninvalid yaml")
-srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), badContent)
+	srv := lsp.NewWithIndex(idx)
+	n := &recordingNotifier{}
+	badContent := []byte("package: libc6\nslices: [\ninvalid yaml")
+	srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), badContent)
 
-params := n.diagParams()
-if len(params) != 1 {
-t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
-}
-if len(params[0].Diagnostics) == 0 {
-t.Fatal("expected at least one diagnostic for parse error")
-}
-if !strings.Contains(params[0].Diagnostics[0].Message, "YAML parse error") {
-t.Errorf("expected parse error message, got %q", params[0].Diagnostics[0].Message)
-}
+	params := n.diagParams()
+	if len(params) != 1 {
+		t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
+	}
+	if len(params[0].Diagnostics) == 0 {
+		t.Fatal("expected at least one diagnostic for parse error")
+	}
+	if !strings.Contains(params[0].Diagnostics[0].Message, "YAML parse error") {
+		t.Errorf("expected parse error message, got %q", params[0].Diagnostics[0].Message)
+	}
 }
 
 func TestReindexAndPublish_CleanFile(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-})
+	})
 
-srv := lsp.NewWithIndex(idx)
-n := &recordingNotifier{}
-cleanContent := []byte(`package: libc6
+	srv := lsp.NewWithIndex(idx)
+	n := &recordingNotifier{}
+	cleanContent := []byte(`package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `)
-srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), cleanContent)
+	srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), cleanContent)
 
-params := n.diagParams()
-if len(params) != 1 {
-t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
-}
-if len(params[0].Diagnostics) != 0 {
-t.Errorf("expected empty diagnostics for clean file, got %v", params[0].Diagnostics)
-}
+	params := n.diagParams()
+	if len(params) != 1 {
+		t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
+	}
+	if len(params[0].Diagnostics) != 0 {
+		t.Errorf("expected empty diagnostics for clean file, got %v", params[0].Diagnostics)
+	}
 }
 
 func TestReindexAndPublish_GlobError(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-})
+	})
 
-srv := lsp.NewWithIndex(idx)
-n := &recordingNotifier{}
-// relative path is invalid
-contentWithBadGlob := []byte(`package: libc6
+	srv := lsp.NewWithIndex(idx)
+	n := &recordingNotifier{}
+	// relative path is invalid
+	contentWithBadGlob := []byte(`package: libc6
 slices:
   libs:
     contents:
       relative/path:
 `)
-srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), contentWithBadGlob)
+	srv.ExportReindexAndPublish(n, filepath.Join(slicesDir, "libc6.yaml"), contentWithBadGlob)
 
-params := n.diagParams()
-if len(params) != 1 || len(params[0].Diagnostics) == 0 {
-t.Fatalf("expected diagnostics for bad glob, got params=%v", params)
-}
-if !strings.Contains(params[0].Diagnostics[0].Message, "absolute") {
-t.Errorf("expected 'absolute' in diagnostic, got %q", params[0].Diagnostics[0].Message)
-}
+	params := n.diagParams()
+	if len(params) != 1 || len(params[0].Diagnostics) == 0 {
+		t.Fatalf("expected diagnostics for bad glob, got params=%v", params)
+	}
+	if !strings.Contains(params[0].Diagnostics[0].Message, "absolute") {
+		t.Errorf("expected 'absolute' in diagnostic, got %q", params[0].Diagnostics[0].Message)
+	}
 }
 
 func TestPublishDiagnosticsForFile_WithIssues(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     essential:
@@ -1449,36 +1450,36 @@ slices:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-})
+	})
 
-srv := lsp.NewWithIndex(idx)
-n := &recordingNotifier{}
-srv.ExportPublishDiagnosticsForFile(n, filepath.Join(slicesDir, "libc6.yaml"))
+	srv := lsp.NewWithIndex(idx)
+	n := &recordingNotifier{}
+	srv.ExportPublishDiagnosticsForFile(n, filepath.Join(slicesDir, "libc6.yaml"))
 
-params := n.diagParams()
-if len(params) != 1 {
-t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
-}
-found := false
-for _, d := range params[0].Diagnostics {
-if strings.Contains(d.Message, "unknown slice reference") {
-found = true
-}
-}
-if !found {
-t.Errorf("expected 'unknown slice reference' diagnostic, got %v", params[0].Diagnostics)
-}
+	params := n.diagParams()
+	if len(params) != 1 {
+		t.Fatalf("expected 1 publishDiagnostics call, got %d", len(params))
+	}
+	found := false
+	for _, d := range params[0].Diagnostics {
+		if strings.Contains(d.Message, "unknown slice reference") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'unknown slice reference' diagnostic, got %v", params[0].Diagnostics)
+	}
 }
 
 func TestRepublishOpenFiles_SendsDiagsForOpenDocs(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -1486,12 +1487,12 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-})
+	})
 
-opensslPath := filepath.Join(slicesDir, "openssl.yaml")
-srv := lsp.NewWithIndex(idx)
-// Mark openssl.yaml as open.
-srv.SetDocForTest(opensslPath, `package: openssl
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	srv := lsp.NewWithIndex(idx)
+	// Mark openssl.yaml as open.
+	srv.SetDocForTest(opensslPath, `package: openssl
 slices:
   bins:
     essential:
@@ -1500,18 +1501,18 @@ slices:
       /usr/bin/openssl:
 `)
 
-n := &recordingNotifier{}
-// skipPath = libc6.yaml; only openssl.yaml (open) should get republished.
-libc6Path := filepath.Join(slicesDir, "libc6.yaml")
-srv.ExportRepublishOpenFiles(n, libc6Path)
+	n := &recordingNotifier{}
+	// skipPath = libc6.yaml; only openssl.yaml (open) should get republished.
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	srv.ExportRepublishOpenFiles(n, libc6Path)
 
-params := n.diagParams()
-if len(params) != 1 {
-t.Fatalf("expected 1 republish notification (for openssl.yaml), got %d", len(params))
-}
-if params[0].URI != lsp.ExportFilePathToURI(opensslPath) {
-t.Errorf("expected openssl.yaml URI, got %s", params[0].URI)
-}
+	params := n.diagParams()
+	if len(params) != 1 {
+		t.Fatalf("expected 1 republish notification (for openssl.yaml), got %d", len(params))
+	}
+	if params[0].URI != lsp.ExportFilePathToURI(opensslPath) {
+		t.Errorf("expected openssl.yaml URI, got %s", params[0].URI)
+	}
 }
 
 // --- textDocument/codeAction ---
@@ -1726,40 +1727,40 @@ slices:
 }
 
 func TestComputeDiagnostics_DuplicateSlice(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"openssl.yaml": `package: openssl
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     contents:
       /usr/bin/openssl:
 `,
-"openssl-extra.yaml": `package: openssl
+		"openssl-extra.yaml": `package: openssl
 slices:
   bins:
     contents:
       /usr/bin/c_rehash:
 `,
-})
-srv := lsp.NewWithIndex(idx)
+	})
+	srv := lsp.NewWithIndex(idx)
 
-file1 := filepath.Join(slicesDir, "openssl.yaml")
-file2 := filepath.Join(slicesDir, "openssl-extra.yaml")
+	file1 := filepath.Join(slicesDir, "openssl.yaml")
+	file2 := filepath.Join(slicesDir, "openssl-extra.yaml")
 
-// Both files should each get a duplicate-slice warning.
-for _, f := range []string{file1, file2} {
-diags := lsp.ExportComputeDiagnostics(srv, f)
-found := false
-for _, d := range diags {
-if d.Code != nil {
-	if code, ok := d.Code.Value.(string); ok && code == "duplicate-slice" {
-found = true
-}
-}
-}
-if !found {
-t.Errorf("expected duplicate-slice diagnostic in %s, got: %v", filepath.Base(f), diags)
-}
-}
+	// Both files should each get a duplicate-slice warning.
+	for _, f := range []string{file1, file2} {
+		diags := lsp.ExportComputeDiagnostics(srv, f)
+		found := false
+		for _, d := range diags {
+			if d.Code != nil {
+				if code, ok := d.Code.Value.(string); ok && code == "duplicate-slice" {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("expected duplicate-slice diagnostic in %s, got: %v", filepath.Base(f), diags)
+		}
+	}
 }
 
 // --- v3 bug reproduction tests ---
@@ -1768,22 +1769,22 @@ t.Errorf("expected duplicate-slice diagnostic in %s, got: %v", filepath.Base(f),
 // essential block is recognised (so the user can get completions when they
 // press <CR> after the last existing entry and haven't typed anything yet).
 func TestIsInsideEssential_V3_EmptyLine(t *testing.T) {
-text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_libs:\n      \n    contents:\n      /usr/bin/foo:\n"
-// Line 5 is "      " (spaces only) — inside the essential block.
-if !lsp.ExportIsInsideEssential(text, 5) {
-t.Error("expected isInsideEssential=true for blank line inside v3 essential block")
-}
+	text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_libs:\n      \n    contents:\n      /usr/bin/foo:\n"
+	// Line 5 is "      " (spaces only) — inside the essential block.
+	if !lsp.ExportIsInsideEssential(text, 5) {
+		t.Error("expected isInsideEssential=true for blank line inside v3 essential block")
+	}
 }
 
 // TestIsInsideEssential_V3_PartialNoUnderscore tests that a partial token
 // without "_" yet (e.g. the user has typed "libc6" and not yet "_libs") is
 // still recognised as inside the essential block.
 func TestIsInsideEssential_V3_PartialNoUnderscore(t *testing.T) {
-text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6\n    contents:\n      /usr/bin/foo:\n"
-// Line 4: "      libc6" — partial v3 key, no underscore yet.
-if !lsp.ExportIsInsideEssential(text, 4) {
-t.Error("expected isInsideEssential=true for partial token without '_'")
-}
+	text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6\n    contents:\n      /usr/bin/foo:\n"
+	// Line 4: "      libc6" — partial v3 key, no underscore yet.
+	if !lsp.ExportIsInsideEssential(text, 4) {
+		t.Error("expected isInsideEssential=true for partial token without '_'")
+	}
 }
 
 // TestIsInsideEssential_V3_CommentInBlock tests that YAML comment lines inside
@@ -1791,45 +1792,45 @@ t.Error("expected isInsideEssential=true for partial token without '_'")
 // Real chisel-releases files (e.g. ubuntu-26.04/libc6.yaml) have comments
 // between entries in the essential map.
 func TestIsInsideEssential_V3_CommentInBlock(t *testing.T) {
-text := "package: foo\nslices:\n  libs:\n    essential:\n      # some comment\n      base-files_lib:\n    contents:\n      /usr/bin/foo:\n"
-// Line 5: "      base-files_lib:" — valid v3 key, but comment is above it.
-if !lsp.ExportIsInsideEssential(text, 5) {
-t.Error("expected isInsideEssential=true for v3 key below a comment line in essential block")
-}
+	text := "package: foo\nslices:\n  libs:\n    essential:\n      # some comment\n      base-files_lib:\n    contents:\n      /usr/bin/foo:\n"
+	// Line 5: "      base-files_lib:" — valid v3 key, but comment is above it.
+	if !lsp.ExportIsInsideEssential(text, 5) {
+		t.Error("expected isInsideEssential=true for v3 key below a comment line in essential block")
+	}
 }
 
 // TestCompletionPrefixAndRange_V3_EmptyLine tests that an empty line inside a
 // v3 essential block produces a valid (zero-prefix, appendColon) result so the
 // caller can offer all slice refs.
 func TestCompletionPrefixAndRange_V3_EmptyLine(t *testing.T) {
-text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_libs:\n      \n    contents:\n      /usr/bin/foo:\n"
-// Line 5 is "      " (6 spaces), cursor at col 6 — right where typing starts.
-prefix, r, needsSpace, appendColon := lsp.ExportCompletionPrefixAndRange(text, 5, 6)
-if prefix != "" {
-t.Errorf("prefix: got %q, want empty string for blank line", prefix)
-}
-if needsSpace {
-t.Error("needsLeadingSpace should be false for v3 context")
-}
-if !appendColon {
-t.Error("appendColon should be true for v3 map-key context")
-}
-if r.Start.Character != 6 {
-t.Errorf("editRange start: got %d, want 6", r.Start.Character)
-}
+	text := "package: foo\nslices:\n  bins:\n    essential:\n      libc6_libs:\n      \n    contents:\n      /usr/bin/foo:\n"
+	// Line 5 is "      " (6 spaces), cursor at col 6 — right where typing starts.
+	prefix, r, needsSpace, appendColon := lsp.ExportCompletionPrefixAndRange(text, 5, 6)
+	if prefix != "" {
+		t.Errorf("prefix: got %q, want empty string for blank line", prefix)
+	}
+	if needsSpace {
+		t.Error("needsLeadingSpace should be false for v3 context")
+	}
+	if !appendColon {
+		t.Error("appendColon should be true for v3 map-key context")
+	}
+	if r.Start.Character != 6 {
+		t.Errorf("editRange start: got %d, want 6", r.Start.Character)
+	}
 }
 
 // TestCompletion_V3_EmptyLine is the end-to-end test: a line inside a
 // v3 essential block with 2+ chars typed must produce completion items.
 func TestCompletion_V3_EmptyLine(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"base-files.yaml": `package: base-files
+		"base-files.yaml": `package: base-files
 slices:
   base:
     essential:
@@ -1837,59 +1838,59 @@ slices:
     contents:
       /etc/:
 `,
-})
-srv := lsp.NewWithIndex(idx)
-basePath := filepath.Join(slicesDir, "base-files.yaml")
-// Doc with "li" typed on a fresh line inside the v3 essential block.
-text := "package: base-files\nslices:\n  base:\n    essential:\n      libc6_libs:\n      li\n    contents:\n      /etc/:\n"
-// Cursor at col 8 on line 5 ("      li" — 2 chars typed after indent).
-items := srv.ExportCompletion(basePath, text, 5, 8)
-if len(items) == 0 {
-t.Fatal("expected completion items for 2-char prefix inside v3 essential block, got none")
-}
+	})
+	srv := lsp.NewWithIndex(idx)
+	basePath := filepath.Join(slicesDir, "base-files.yaml")
+	// Doc with "li" typed on a fresh line inside the v3 essential block.
+	text := "package: base-files\nslices:\n  base:\n    essential:\n      libc6_libs:\n      li\n    contents:\n      /etc/:\n"
+	// Cursor at col 8 on line 5 ("      li" — 2 chars typed after indent).
+	items := srv.ExportCompletion(basePath, text, 5, 8)
+	if len(items) == 0 {
+		t.Fatal("expected completion items for 2-char prefix inside v3 essential block, got none")
+	}
 }
 
 // TestCompletion_V3_CommentInBlock ensures completions work when there is a
 // YAML comment between the essential: header and the current entry — matching
 // real ubuntu-26.04 files like libc6.yaml.
 func TestCompletion_V3_CommentInBlock(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"base-files.yaml": `package: base-files
+		"base-files.yaml": `package: base-files
 slices:
   lib:
     contents:
       /lib/:
 `,
-})
-srv := lsp.NewWithIndex(idx)
-libc6Path := filepath.Join(slicesDir, "libc6.yaml")
-// A v3 file with a YAML comment inside the essential block.
-text := "package: libc6\nslices:\n  gconv-core:\n    essential:\n      # explicit dependency\n      base-files_lib:\n    contents:\n      /usr/lib/*-linux-*/gconv/ANSI_X3.110.so:\n"
-// Cursor on "      base-files_lib:" (line 5) — after the comment.
-items := srv.ExportCompletion(libc6Path, text, 5, 20)
-if len(items) == 0 {
-t.Fatal("expected completion items for v3 entry below a comment line, got none")
-}
+	})
+	srv := lsp.NewWithIndex(idx)
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	// A v3 file with a YAML comment inside the essential block.
+	text := "package: libc6\nslices:\n  gconv-core:\n    essential:\n      # explicit dependency\n      base-files_lib:\n    contents:\n      /usr/lib/*-linux-*/gconv/ANSI_X3.110.so:\n"
+	// Cursor on "      base-files_lib:" (line 5) — after the comment.
+	items := srv.ExportCompletion(libc6Path, text, 5, 20)
+	if len(items) == 0 {
+		t.Fatal("expected completion items for v3 entry below a comment line, got none")
+	}
 }
 
 // TestReferences_V3_FromEssentialKey verifies that find-references works when
 // the cursor is on a v3-style map key (e.g. "libc6_libs:") in the essential block.
 // Cursor lands on the colon position to test the edge case.
 func TestReferences_V3_FromEssentialKey(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -1897,33 +1898,33 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-})
-opensslPath := filepath.Join(slicesDir, "openssl.yaml")
-srv := lsp.NewWithIndex(idx)
+	})
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	srv := lsp.NewWithIndex(idx)
 
-// Line 4 of openssl.yaml: "      libc6_libs:"
-// Cursor at col 15 — on the "s" before the colon (last char of the word).
-locs, err := srv.ExportReferences(opensslPath, 4, 15)
-if err != nil {
-t.Fatal(err)
-}
-// Expect at least the definition location (fallback) or a real reference.
-if len(locs) == 0 {
-t.Fatal("expected at least 1 location from v3 essential key, got none")
-}
+	// Line 4 of openssl.yaml: "      libc6_libs:"
+	// Cursor at col 15 — on the "s" before the colon (last char of the word).
+	locs, err := srv.ExportReferences(opensslPath, 4, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expect at least the definition location (fallback) or a real reference.
+	if len(locs) == 0 {
+		t.Fatal("expected at least 1 location from v3 essential key, got none")
+	}
 }
 
 // TestReferences_V3_DefinitionSite verifies that find-references from the
 // definition key (e.g. "libs:" in slices: section) finds v3-format references.
 func TestReferences_V3_DefinitionSite(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -1931,25 +1932,25 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-})
-libc6Path := filepath.Join(slicesDir, "libc6.yaml")
-srv := lsp.NewWithIndex(idx)
+	})
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	srv := lsp.NewWithIndex(idx)
 
-// Line 2 of libc6.yaml: "  libs:" — cursor on "libs"
-locs, err := srv.ExportReferences(libc6Path, 2, 3)
-if err != nil {
-t.Fatal(err)
-}
-// Must find the reference in openssl.yaml's v3 essential block.
-foundRef := false
-for _, loc := range locs {
-if strings.Contains(string(loc.URI), "openssl.yaml") {
-foundRef = true
-}
-}
-if !foundRef {
-t.Errorf("expected reference in openssl.yaml (v3 essential), got: %v", locs)
-}
+	// Line 2 of libc6.yaml: "  libs:" — cursor on "libs"
+	locs, err := srv.ExportReferences(libc6Path, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Must find the reference in openssl.yaml's v3 essential block.
+	foundRef := false
+	for _, loc := range locs {
+		if strings.Contains(string(loc.URI), "openssl.yaml") {
+			foundRef = true
+		}
+	}
+	if !foundRef {
+		t.Errorf("expected reference in openssl.yaml (v3 essential), got: %v", locs)
+	}
 }
 
 // --- minPrefixLength configuration ---
@@ -1957,14 +1958,14 @@ t.Errorf("expected reference in openssl.yaml (v3 essential), got: %v", locs)
 // TestCompletion_MinPrefixLen_Default verifies the default threshold of 2:
 // 0 and 1 chars produce no items; 2 chars do.
 func TestCompletion_MinPrefixLen_Default(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -1972,40 +1973,40 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-})
-srv := lsp.NewWithIndex(idx)
-opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	})
+	srv := lsp.NewWithIndex(idx)
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
 
-// v1/v2: "      - " (cursor at col 8, prefix="") — should block.
-text0 := "package: openssl\nslices:\n  bins:\n    essential:\n      - \n    contents:\n      /usr/bin/openssl:\n"
-if items := srv.ExportCompletion(opensslPath, text0, 4, 8); len(items) != 0 {
-t.Errorf("0-char prefix: expected no completions (min=2), got %d", len(items))
-}
+	// v1/v2: "      - " (cursor at col 8, prefix="") — should block.
+	text0 := "package: openssl\nslices:\n  bins:\n    essential:\n      - \n    contents:\n      /usr/bin/openssl:\n"
+	if items := srv.ExportCompletion(opensslPath, text0, 4, 8); len(items) != 0 {
+		t.Errorf("0-char prefix: expected no completions (min=2), got %d", len(items))
+	}
 
-// v1/v2: "      - l" (cursor at col 9, prefix="l") — 1 char, still blocks.
-text1 := "package: openssl\nslices:\n  bins:\n    essential:\n      - l\n    contents:\n      /usr/bin/openssl:\n"
-if items := srv.ExportCompletion(opensslPath, text1, 4, 9); len(items) != 0 {
-t.Errorf("1-char prefix: expected no completions (min=2), got %d", len(items))
-}
+	// v1/v2: "      - l" (cursor at col 9, prefix="l") — 1 char, still blocks.
+	text1 := "package: openssl\nslices:\n  bins:\n    essential:\n      - l\n    contents:\n      /usr/bin/openssl:\n"
+	if items := srv.ExportCompletion(opensslPath, text1, 4, 9); len(items) != 0 {
+		t.Errorf("1-char prefix: expected no completions (min=2), got %d", len(items))
+	}
 
-// v1/v2: "      - li" (cursor at col 10, prefix="li") — 2 chars, should pass.
-text2 := "package: openssl\nslices:\n  bins:\n    essential:\n      - li\n    contents:\n      /usr/bin/openssl:\n"
-if items := srv.ExportCompletion(opensslPath, text2, 4, 10); len(items) == 0 {
-t.Error("2-char prefix: expected completions at default min=2, got none")
-}
+	// v1/v2: "      - li" (cursor at col 10, prefix="li") — 2 chars, should pass.
+	text2 := "package: openssl\nslices:\n  bins:\n    essential:\n      - li\n    contents:\n      /usr/bin/openssl:\n"
+	if items := srv.ExportCompletion(opensslPath, text2, 4, 10); len(items) == 0 {
+		t.Error("2-char prefix: expected completions at default min=2, got none")
+	}
 }
 
 // TestCompletion_MinPrefixLen_Custom verifies that a custom threshold of 3
 // blocks a 2-char prefix but allows a 3-char prefix.
 func TestCompletion_MinPrefixLen_Custom(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -2013,35 +2014,35 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-})
-srv := lsp.NewWithIndex(idx)
-srv.SetMinPrefixLen(3)
-opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	})
+	srv := lsp.NewWithIndex(idx)
+	srv.SetMinPrefixLen(3)
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
 
-// "      - li" (2 chars) — blocked when min=3.
-text2 := "package: openssl\nslices:\n  bins:\n    essential:\n      - li\n    contents:\n      /usr/bin/openssl:\n"
-if items := srv.ExportCompletion(opensslPath, text2, 4, 10); len(items) != 0 {
-t.Errorf("2-char prefix with min=3: expected no completions, got %d", len(items))
-}
+	// "      - li" (2 chars) — blocked when min=3.
+	text2 := "package: openssl\nslices:\n  bins:\n    essential:\n      - li\n    contents:\n      /usr/bin/openssl:\n"
+	if items := srv.ExportCompletion(opensslPath, text2, 4, 10); len(items) != 0 {
+		t.Errorf("2-char prefix with min=3: expected no completions, got %d", len(items))
+	}
 
-// "      - lib" (3 chars) — should pass with min=3.
-text3 := "package: openssl\nslices:\n  bins:\n    essential:\n      - lib\n    contents:\n      /usr/bin/openssl:\n"
-if items := srv.ExportCompletion(opensslPath, text3, 4, 11); len(items) == 0 {
-t.Error("3-char prefix with min=3: expected completions, got none")
-}
+	// "      - lib" (3 chars) — should pass with min=3.
+	text3 := "package: openssl\nslices:\n  bins:\n    essential:\n      - lib\n    contents:\n      /usr/bin/openssl:\n"
+	if items := srv.ExportCompletion(opensslPath, text3, 4, 11); len(items) == 0 {
+		t.Error("3-char prefix with min=3: expected completions, got none")
+	}
 }
 
 // TestCompletion_MinPrefixLen_ClampsToTwo verifies that setting min < 2 is
 // silently raised to 2 so the server never offers completions at 1 char.
 func TestCompletion_MinPrefixLen_ClampsToTwo(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -2049,35 +2050,35 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-})
-srv := lsp.NewWithIndex(idx)
-// SetMinPrefixLen with 1 — should be clamped to 2 at runtime by applySettings,
-// but here we set directly; the guard in computeCompletion uses minPrefixLen()
-// which reads config.MinPrefixLen directly, so clamping must happen in applySettings.
-// We test the applySettings path via workspaceDidChangeConfiguration simulation.
-srv.SetMinPrefixLen(1) // forces the value to 1 for this test
-opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	})
+	srv := lsp.NewWithIndex(idx)
+	// SetMinPrefixLen with 1 — should be clamped to 2 at runtime by applySettings,
+	// but here we set directly; the guard in computeCompletion uses minPrefixLen()
+	// which reads config.MinPrefixLen directly, so clamping must happen in applySettings.
+	// We test the applySettings path via workspaceDidChangeConfiguration simulation.
+	srv.SetMinPrefixLen(1) // forces the value to 1 for this test
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
 
-// With min=1, a 1-char prefix should now produce completions.
-text1 := "package: openssl\nslices:\n  bins:\n    essential:\n      - l\n    contents:\n      /usr/bin/openssl:\n"
-if items := srv.ExportCompletion(opensslPath, text1, 4, 9); len(items) == 0 {
-// This is expected to succeed when clamping is NOT enforced in SetMinPrefixLen.
-// The clamping only applies in applySettings.
-t.Skip("SetMinPrefixLen intentionally allows < 2 (clamping is in applySettings only)")
-}
+	// With min=1, a 1-char prefix should now produce completions.
+	text1 := "package: openssl\nslices:\n  bins:\n    essential:\n      - l\n    contents:\n      /usr/bin/openssl:\n"
+	if items := srv.ExportCompletion(opensslPath, text1, 4, 9); len(items) == 0 {
+		// This is expected to succeed when clamping is NOT enforced in SetMinPrefixLen.
+		// The clamping only applies in applySettings.
+		t.Skip("SetMinPrefixLen intentionally allows < 2 (clamping is in applySettings only)")
+	}
 }
 
 // TestApplySettings_MinPrefixLen verifies that applySettings reads and clamps
 // the minPrefixLength value correctly.
 func TestApplySettings_MinPrefixLen(t *testing.T) {
-idx, slicesDir := setupLSPIndex(t, map[string]string{
-"libc6.yaml": `package: libc6
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
 slices:
   libs:
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
-"openssl.yaml": `package: openssl
+		"openssl.yaml": `package: openssl
 slices:
   bins:
     essential:
@@ -2085,62 +2086,62 @@ slices:
     contents:
       /usr/bin/openssl:
 `,
-})
-opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	})
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
 
-cases := []struct {
-name    string
-setting map[string]any
-prefix  string       // what the user has typed (just the ref part)
-line    string       // full YAML line at cursor position
-col     int
-wantAny bool
-}{
-{
-name:    "value_0_clamped_to_2_blocks_1_char",
-setting: map[string]any{"minPrefixLength": float64(0)},
-prefix:  "l",
-line:    "package: openssl\nslices:\n  bins:\n    essential:\n      - l\n    contents:\n      /usr/bin/openssl:\n",
-col:     9,
-wantAny: false,
-},
-{
-name:    "value_3_blocks_2_char",
-setting: map[string]any{"minPrefixLength": float64(3)},
-prefix:  "li",
-line:    "package: openssl\nslices:\n  bins:\n    essential:\n      - li\n    contents:\n      /usr/bin/openssl:\n",
-col:     10,
-wantAny: false,
-},
-{
-name:    "value_3_allows_3_char",
-setting: map[string]any{"minPrefixLength": float64(3)},
-prefix:  "lib",
-line:    "package: openssl\nslices:\n  bins:\n    essential:\n      - lib\n    contents:\n      /usr/bin/openssl:\n",
-col:     11,
-wantAny: true,
-},
-{
-name:    "nested_chiselReleasesLsp_key",
-setting: map[string]any{"chiselReleasesLsp": map[string]any{"minPrefixLength": float64(2)}},
-prefix:  "li",
-line:    "package: openssl\nslices:\n  bins:\n    essential:\n      - li\n    contents:\n      /usr/bin/openssl:\n",
-col:     10,
-wantAny: true,
-},
-}
+	cases := []struct {
+		name    string
+		setting map[string]any
+		prefix  string // what the user has typed (just the ref part)
+		line    string // full YAML line at cursor position
+		col     int
+		wantAny bool
+	}{
+		{
+			name:    "value_0_clamped_to_2_blocks_1_char",
+			setting: map[string]any{"minPrefixLength": float64(0)},
+			prefix:  "l",
+			line:    "package: openssl\nslices:\n  bins:\n    essential:\n      - l\n    contents:\n      /usr/bin/openssl:\n",
+			col:     9,
+			wantAny: false,
+		},
+		{
+			name:    "value_3_blocks_2_char",
+			setting: map[string]any{"minPrefixLength": float64(3)},
+			prefix:  "li",
+			line:    "package: openssl\nslices:\n  bins:\n    essential:\n      - li\n    contents:\n      /usr/bin/openssl:\n",
+			col:     10,
+			wantAny: false,
+		},
+		{
+			name:    "value_3_allows_3_char",
+			setting: map[string]any{"minPrefixLength": float64(3)},
+			prefix:  "lib",
+			line:    "package: openssl\nslices:\n  bins:\n    essential:\n      - lib\n    contents:\n      /usr/bin/openssl:\n",
+			col:     11,
+			wantAny: true,
+		},
+		{
+			name:    "nested_chiselReleasesLsp_key",
+			setting: map[string]any{"chiselReleasesLsp": map[string]any{"minPrefixLength": float64(2)}},
+			prefix:  "li",
+			line:    "package: openssl\nslices:\n  bins:\n    essential:\n      - li\n    contents:\n      /usr/bin/openssl:\n",
+			col:     10,
+			wantAny: true,
+		},
+	}
 
-for _, tc := range cases {
-t.Run(tc.name, func(t *testing.T) {
-srv := lsp.NewWithIndex(idx)
-srv.ExportApplySettings(tc.setting)
-items := srv.ExportCompletion(opensslPath, tc.line, 4, tc.col)
-if tc.wantAny && len(items) == 0 {
-t.Errorf("expected completions with prefix %q, got none", tc.prefix)
-}
-if !tc.wantAny && len(items) != 0 {
-t.Errorf("expected no completions with prefix %q, got %d", tc.prefix, len(items))
-}
-})
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := lsp.NewWithIndex(idx)
+			srv.ExportApplySettings(tc.setting)
+			items := srv.ExportCompletion(opensslPath, tc.line, 4, tc.col)
+			if tc.wantAny && len(items) == 0 {
+				t.Errorf("expected completions with prefix %q, got none", tc.prefix)
+			}
+			if !tc.wantAny && len(items) != 0 {
+				t.Errorf("expected no completions with prefix %q, got %d", tc.prefix, len(items))
+			}
+		})
+	}
 }

@@ -224,32 +224,32 @@ func parseYAML(t *testing.T, yaml string) *parser.SliceFile {
 }
 
 func TestAllFilesSorted(t *testing.T) {
-dir := writeRelease(t, map[string]string{
-"openssl.yaml": openssl,
-"libc6.yaml":   libc6,
-})
+	dir := writeRelease(t, map[string]string{
+		"openssl.yaml": openssl,
+		"libc6.yaml":   libc6,
+	})
 
-idx, err := index.New(dir, nil, nil)
-if err != nil {
-t.Fatal(err)
-}
-defer idx.Close()
+	idx, err := index.New(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
 
-files := idx.AllFiles()
-if !sort.StringsAreSorted(files) {
-t.Errorf("AllFiles() not sorted: %v", files)
-}
-if len(files) != 2 {
-t.Errorf("expected 2 files, got %d: %v", len(files), files)
-}
+	files := idx.AllFiles()
+	if !sort.StringsAreSorted(files) {
+		t.Errorf("AllFiles() not sorted: %v", files)
+	}
+	if len(files) != 2 {
+		t.Errorf("expected 2 files, got %d: %v", len(files), files)
+	}
 }
 
 func TestFindReferences_CrossFile(t *testing.T) {
-// libc6.yaml defines libc6_libs; openssl.yaml and curl.yaml both reference it.
-dir := writeRelease(t, map[string]string{
-"libc6.yaml": libc6,
-"openssl.yaml": openssl, // has essential: [libc6_libs]
-"curl.yaml": `
+	// libc6.yaml defines libc6_libs; openssl.yaml and curl.yaml both reference it.
+	dir := writeRelease(t, map[string]string{
+		"libc6.yaml":   libc6,
+		"openssl.yaml": openssl, // has essential: [libc6_libs]
+		"curl.yaml": `
 package: curl
 slices:
   bins:
@@ -259,50 +259,50 @@ slices:
     contents:
       /usr/bin/curl:
 `,
-})
+	})
 
-idx, err := index.New(dir, nil, nil)
-if err != nil {
-t.Fatal(err)
-}
-defer idx.Close()
+	idx, err := index.New(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
 
-refs := idx.FindReferences("libc6", "libs")
-if len(refs) != 2 {
-t.Fatalf("expected 2 references to libc6_libs, got %d: %v", len(refs), refs)
-}
-// Results should be sorted by file path: curl.yaml before openssl.yaml.
-if filepath.Base(refs[0].File) != "curl.yaml" {
-t.Errorf("expected first ref in curl.yaml, got %s", filepath.Base(refs[0].File))
-}
-if filepath.Base(refs[1].File) != "openssl.yaml" {
-t.Errorf("expected second ref in openssl.yaml, got %s", filepath.Base(refs[1].File))
-}
+	refs := idx.FindReferences("libc6", "libs")
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 references to libc6_libs, got %d: %v", len(refs), refs)
+	}
+	// Results should be sorted by file path: curl.yaml before openssl.yaml.
+	if filepath.Base(refs[0].File) != "curl.yaml" {
+		t.Errorf("expected first ref in curl.yaml, got %s", filepath.Base(refs[0].File))
+	}
+	if filepath.Base(refs[1].File) != "openssl.yaml" {
+		t.Errorf("expected second ref in openssl.yaml, got %s", filepath.Base(refs[1].File))
+	}
 }
 
 func TestFindReferences_NoRefs(t *testing.T) {
-dir := writeRelease(t, map[string]string{
-"libc6.yaml":   libc6,
-"openssl.yaml": openssl,
-})
+	dir := writeRelease(t, map[string]string{
+		"libc6.yaml":   libc6,
+		"openssl.yaml": openssl,
+	})
 
-idx, err := index.New(dir, nil, nil)
-if err != nil {
-t.Fatal(err)
-}
-defer idx.Close()
+	idx, err := index.New(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
 
-refs := idx.FindReferences("libc6", "copyright")
-if refs != nil && len(refs) != 0 {
-t.Errorf("expected no references to libc6_copyright, got %v", refs)
-}
+	refs := idx.FindReferences("libc6", "copyright")
+	if refs != nil && len(refs) != 0 {
+		t.Errorf("expected no references to libc6_copyright, got %v", refs)
+	}
 }
 
 func TestFindReferences_TopLevelEssential(t *testing.T) {
-// Top-level essential on the SliceFile (applies to all slices in the package).
-dir := writeRelease(t, map[string]string{
-"libc6.yaml": libc6,
-"curl.yaml": `
+	// Top-level essential on the SliceFile (applies to all slices in the package).
+	dir := writeRelease(t, map[string]string{
+		"libc6.yaml": libc6,
+		"curl.yaml": `
 package: curl
 essential:
   - libc6_libs
@@ -311,19 +311,19 @@ slices:
     contents:
       /usr/bin/curl:
 `,
-})
+	})
 
-idx, err := index.New(dir, nil, nil)
-if err != nil {
-t.Fatal(err)
-}
-defer idx.Close()
+	idx, err := index.New(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
 
-refs := idx.FindReferences("libc6", "libs")
-if len(refs) != 1 {
-t.Fatalf("expected 1 top-level reference, got %d: %v", len(refs), refs)
-}
-if filepath.Base(refs[0].File) != "curl.yaml" {
-t.Errorf("expected ref in curl.yaml, got %s", filepath.Base(refs[0].File))
-}
+	refs := idx.FindReferences("libc6", "libs")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 top-level reference, got %d: %v", len(refs), refs)
+	}
+	if filepath.Base(refs[0].File) != "curl.yaml" {
+		t.Errorf("expected ref in curl.yaml, got %s", filepath.Base(refs[0].File))
+	}
 }

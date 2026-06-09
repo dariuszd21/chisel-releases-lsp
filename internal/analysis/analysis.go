@@ -73,7 +73,6 @@ func CheckPackageName(filePath string, sf *parser.SliceFile) *Diagnostic {
 	}
 }
 
-
 // Chisel uses Go's path.Match-style globs but also allows **, so we normalise
 // ** → "*" for the stdlib check.
 func validateGlobPath(p string) string {
@@ -101,13 +100,13 @@ func validateGlobPath(p string) string {
 
 // Collision describes two slices from different packages that conflict on a path.
 type Collision struct {
-	Path     string
-	SliceA   string // pkg_slice
-	FileA    string
-	RangeA   parser.Range
-	SliceB   string // pkg_slice
-	FileB    string
-	RangeB   parser.Range
+	Path   string
+	SliceA string // pkg_slice
+	FileA  string
+	RangeA parser.Range
+	SliceB string // pkg_slice
+	FileB  string
+	RangeB parser.Range
 }
 
 // DetectCollisions finds all concrete (non-glob) paths that are claimed by
@@ -117,10 +116,10 @@ type Collision struct {
 // For LSP purposes we flag cross-package duplicate concrete paths as collisions.
 func DetectCollisions(idx *index.Index) []Collision {
 	type entry struct {
-		pkg      string
+		pkg       string
 		sliceName string
-		file     string
-		r        parser.Range
+		file      string
+		r         parser.Range
 	}
 	// path → list of entries
 	pathMap := make(map[string][]entry)
@@ -208,8 +207,8 @@ type DuplicateSlice struct {
 // in more than one file. Results are sorted by Pkg then SliceName for determinism.
 func DetectDuplicateSlices(idx *index.Index) []DuplicateSlice {
 	type entry struct {
-		file  string
-		rng   parser.Range
+		file string
+		rng  parser.Range
 	}
 	// (pkg+":"+sliceName) → first entry seen
 	seen := make(map[string]entry)

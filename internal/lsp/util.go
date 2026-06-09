@@ -178,4 +178,3 @@ func isInsideEssential(text string, lineIdx int) bool {
 	}
 	return false
 }
-
