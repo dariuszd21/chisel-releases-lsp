@@ -2145,3 +2145,176 @@ slices:
 		})
 	}
 }
+
+// --- hover tests ---
+
+// TestHover_V1Essential checks hover on a v1/v2 sequence-style essential reference.
+// Line 4 of the doc is "      - libc6_libs" → token "libc6_libs" at col 8.
+func TestHover_V1Essential(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    hint: "C standard library"
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+		"foo.yaml": `package: foo
+slices:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/foo:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	// line 4: "      - libc6_libs" → "libc6_libs" starts at col 8
+	h, err := srv.ExportHover(fooPath, 4, 8)
+	if err != nil {
+		t.Fatalf("hover error: %v", err)
+	}
+	if h == nil {
+		t.Fatal("expected hover result, got nil")
+	}
+	mc, ok := h.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected MarkupContent, got %T", h.Contents)
+	}
+	if !strings.Contains(mc.Value, "libc6_libs") {
+		t.Errorf("hover markdown missing slice name: %s", mc.Value)
+	}
+	if !strings.Contains(mc.Value, "C standard library") {
+		t.Errorf("hover markdown missing hint: %s", mc.Value)
+	}
+}
+
+// TestHover_V3MapKey checks hover on a v3 map-style essential key.
+// Line 4 of the doc is "      libc6_libs:" → token "libc6_libs" at col 6.
+func TestHover_V3MapKey(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+		"foo.yaml": `package: foo
+slices:
+  bins:
+    essential:
+      libc6_libs:
+    contents:
+      /usr/bin/foo:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	// line 4: "      libc6_libs:" → "libc6_libs" at col 6
+	h, err := srv.ExportHover(fooPath, 4, 6)
+	if err != nil {
+		t.Fatalf("hover error: %v", err)
+	}
+	if h == nil {
+		t.Fatal("expected hover result for v3 map key, got nil")
+	}
+	mc, ok := h.Contents.(protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected MarkupContent, got %T", h.Contents)
+	}
+	if !strings.Contains(mc.Value, "libc6_libs") {
+		t.Errorf("hover markdown missing slice name: %s", mc.Value)
+	}
+}
+
+// TestHover_V3MapKey_CursorOnWhitespace checks that placing the cursor on
+// leading whitespace (not on any token) returns nil.
+func TestHover_V3MapKey_CursorOnWhitespace(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /lib/x86_64-linux-gnu/libc.so.6:
+`,
+		"foo.yaml": `package: foo
+slices:
+  bins:
+    essential:
+      libc6_libs:
+    contents:
+      /usr/bin/foo:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	// line 4: "      libc6_libs:" → cols 0-5 are spaces, no token there
+	h, err := srv.ExportHover(fooPath, 4, 2)
+	if err != nil {
+		t.Fatalf("hover error: %v", err)
+	}
+	if h != nil {
+		t.Errorf("expected nil hover on whitespace, got: %+v", h)
+	}
+}
+
+// TestHover_UnknownRef checks that hover on an unresolvable reference returns nil.
+func TestHover_UnknownRef(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"foo.yaml": `package: foo
+slices:
+  bins:
+    essential:
+      - ghost_slice
+    contents:
+      /usr/bin/foo:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	// line 4: "      - ghost_slice" → token at col 8
+	h, err := srv.ExportHover(fooPath, 4, 8)
+	if err != nil {
+		t.Fatalf("hover error: %v", err)
+	}
+	if h != nil {
+		t.Errorf("expected nil hover for unknown ref, got: %+v", h)
+	}
+}
+
+// --- v3 diagnostics tests ---
+
+// TestComputeDiagnostics_UnknownRef_V3 verifies that an unknown-slice-ref
+// diagnostic is emitted for v3 map-style essential entries just as it is for
+// v1/v2 sequence-style entries.
+func TestComputeDiagnostics_UnknownRef_V3(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"foo.yaml": `package: foo
+slices:
+  bins:
+    essential:
+      nonexistent_slice:
+    contents:
+      /usr/bin/foo:
+`,
+	})
+
+	srv := lsp.NewWithIndex(idx)
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+	diags := srv.ExportComputeDiagnostics(fooPath)
+
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, "unknown slice reference") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected unknown-ref diagnostic for v3 map-style entry, got: %v", diags)
+	}
+}

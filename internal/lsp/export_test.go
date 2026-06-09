@@ -181,3 +181,15 @@ func (s *Server) SetMinPrefixLen(n int) {
 func (s *Server) ExportApplySettings(v any) {
 	s.applySettings(v)
 }
+
+// ExportHover calls textDocumentHover with the given file path and position.
+// Call SetDocForTest first if the file content hasn't been written to disk yet.
+func (s *Server) ExportHover(filePath string, line, char int) (*protocol.Hover, error) {
+	uri := filePathToURI(filePath)
+	return s.textDocumentHover(nil, &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: uint32(line), Character: uint32(char)},
+		},
+	})
+}
