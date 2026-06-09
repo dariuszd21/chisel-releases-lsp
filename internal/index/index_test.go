@@ -293,7 +293,7 @@ func TestFindReferences_NoRefs(t *testing.T) {
 	defer idx.Close()
 
 	refs := idx.FindReferences("libc6", "copyright")
-	if refs != nil && len(refs) != 0 {
+	if len(refs) != 0 {
 		t.Errorf("expected no references to libc6_copyright, got %v", refs)
 	}
 }

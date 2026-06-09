@@ -72,7 +72,7 @@ func New(releaseRoot string, onChange func(filePath string), onDelete func(fileP
 // Close stops the file watcher.
 func (idx *Index) Close() {
 	if idx.watcher != nil {
-		idx.watcher.Close()
+		_ = idx.watcher.Close()
 	}
 }
 
