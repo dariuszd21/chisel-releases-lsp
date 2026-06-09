@@ -243,7 +243,7 @@ func (idx *Index) loadAll(slicesDir string) error {
 	return nil
 }
 
-func (idx *Index) watchLoop(slicesDir string) {
+func (idx *Index) watchLoop(_ string) {
 	for {
 		select {
 		case event, ok := <-idx.watcher.Events:

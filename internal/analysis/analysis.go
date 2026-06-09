@@ -18,6 +18,7 @@ import (
 // Severity mirrors LSP diagnostic severity values.
 type Severity int
 
+// Severity constants mirror LSP diagnostic severity values.
 const (
 	SeverityError   Severity = 1
 	SeverityWarning Severity = 2

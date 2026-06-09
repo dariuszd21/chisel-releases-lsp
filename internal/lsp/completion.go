@@ -36,7 +36,7 @@ func (s *Server) textDocumentCompletion(_ *glsp.Context, params *protocol.Comple
 
 // computeCompletion returns completion items for a given cursor position,
 // or nil if the position is not inside an essential: list.
-func (s *Server) computeCompletion(text string, uri protocol.DocumentUri, line, char int) []protocol.CompletionItem {
+func (s *Server) computeCompletion(text string, _ protocol.DocumentUri, line, char int) []protocol.CompletionItem {
 	if !isInsideEssential(text, line) {
 		return nil
 	}
