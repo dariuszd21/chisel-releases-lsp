@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -18,8 +19,9 @@ func (s *Server) textDocumentCodeAction(_ *glsp.Context, params *protocol.CodeAc
 }
 
 // computeCodeActions maps a set of (client-reflected) diagnostics to quick-fix
-// CodeActions. It reads the document from the in-memory store to validate that
-// targeted lines have the expected YAML structure before offering edits.
+// CodeActions. It reads the document from the in-memory store (or disk as
+// fallback) to validate that targeted lines have the expected YAML structure
+// before offering edits.
 func (s *Server) computeCodeActions(
 	filePath string,
 	uri protocol.DocumentUri,
@@ -29,7 +31,15 @@ func (s *Server) computeCodeActions(
 	trueVal := true
 
 	// Document text is needed to validate line structure and compute last-line ranges.
-	doc, _ := s.getDoc(filePath)
+	// Fall back to disk if the file isn't in the in-memory store (e.g. code action
+	// triggered before textDocument/didOpen was processed).
+	doc, ok := s.getDoc(filePath)
+	if !ok {
+		data, err := os.ReadFile(filePath)
+		if err == nil {
+			doc = string(data)
+		}
+	}
 	lines := strings.Split(doc, "\n")
 
 	var actions []protocol.CodeAction
@@ -41,9 +51,11 @@ func (s *Server) computeCodeActions(
 		switch code {
 		case DiagCodeUnknownSliceRef, DiagCodeInvalidSliceRef:
 			lineNum := int(diag.Range.Start.Line)
-			// Only offer the remove action when the line is a YAML block sequence
-			// item ("  - ...") to avoid mangling non-list lines.
-			if !isListItemLine(lines, lineNum) {
+			// Offer the remove action for both v1/v2 list items ("  - pkg_slice")
+			// and v3 map entries ("  pkg_slice:" or "  badref:").
+			// Diagnostics for these codes are always on essential-block lines so
+			// deletion is safe; the guard is just a sanity check against corrupt input.
+			if !isListItemLine(lines, lineNum) && !isYAMLMapKeyLine(lines, lineNum) {
 				continue
 			}
 			title := "Remove unknown reference"
@@ -88,6 +100,21 @@ func isListItemLine(lines []string, lineNum int) bool {
 		return false
 	}
 	return strings.HasPrefix(strings.TrimLeft(lines[lineNum], " \t"), "- ")
+}
+
+// isYAMLMapKeyLine reports whether the line at lineNum is an indented YAML
+// mapping key (e.g. "  pkg_slice:" or "  badformat:"). It matches any line
+// whose trimmed content contains ":" and doesn't start with "-" or "#".
+// Used to identify v3-style essential entries for code-action deletion.
+func isYAMLMapKeyLine(lines []string, lineNum int) bool {
+	if lineNum < 0 || lineNum >= len(lines) {
+		return false
+	}
+	trimmed := strings.TrimSpace(lines[lineNum])
+	return trimmed != "" &&
+		!strings.HasPrefix(trimmed, "-") &&
+		!strings.HasPrefix(trimmed, "#") &&
+		strings.Contains(trimmed, ":")
 }
 
 // fullLineDeleteRange returns a Range that, when replaced with an empty string,

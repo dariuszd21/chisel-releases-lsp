@@ -1699,8 +1699,93 @@ slices:
 	}
 }
 
+func TestCodeAction_UnknownRef_V3MapStyle_OffersRemove(t *testing.T) {
+	// v3 map-style essential entry ("  nonexistent_slice:") must also get a
+	// "Remove unknown reference" code action. This was broken: isListItemLine
+	// only accepted "- item" format and silently skipped map entries.
+	fooContent := `package: foo
+slices:
+  bins:
+    essential:
+      nonexistent_slice:
+    contents:
+      /usr/bin/foo:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"foo.yaml": fooContent})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(fooPath, fooContent)
+
+	diags := srv.ExportComputeDiagnostics(fooPath)
+
+	var refDiags []protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "unknown-slice-ref" {
+				refDiags = append(refDiags, d)
+			}
+		}
+	}
+	if len(refDiags) == 0 {
+		t.Fatalf("expected unknown-slice-ref diagnostic, got %v", diags)
+	}
+
+	actions := srv.ExportCodeAction(fooPath, refDiags)
+	found := false
+	for _, a := range actions {
+		if a.Title == "Remove unknown reference" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'Remove unknown reference' action for v3 map entry, got: %v", actions)
+	}
+}
+
+func TestCodeAction_InvalidRef_V3MapStyle_OffersRemove(t *testing.T) {
+	// v3 map-style invalid ref ("  badformat:") must also get a remove action.
+	fooContent := `package: foo
+slices:
+  bins:
+    essential:
+      badformat:
+    contents:
+      /usr/bin/foo:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"foo.yaml": fooContent})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(fooPath, fooContent)
+
+	diags := srv.ExportComputeDiagnostics(fooPath)
+
+	var invalidDiags []protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "invalid-slice-ref" {
+				invalidDiags = append(invalidDiags, d)
+			}
+		}
+	}
+	if len(invalidDiags) == 0 {
+		t.Fatalf("expected invalid-slice-ref diagnostic, got %v", diags)
+	}
+
+	actions := srv.ExportCodeAction(fooPath, invalidDiags)
+	found := false
+	for _, a := range actions {
+		if a.Title == "Remove invalid reference" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'Remove invalid reference' action for v3 map entry, got: %v", actions)
+	}
+}
+
 func TestCodeAction_AllDiagnosticsHaveCodes(t *testing.T) {
-	// Verify that every diagnostic emitted by computeDiagnostics has a Code set.
 	fooContent := `package: wrongname
 slices:
   bins:
