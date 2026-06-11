@@ -1785,6 +1785,52 @@ slices:
 	}
 }
 
+// TestCodeAction_NilCodeRoundTrip verifies that code actions work even when
+// the client-reflected diagnostics have Code.Value == nil. This simulates the
+// real-world failure mode caused by glsp's IntegerOrString.UnmarshalJSON using
+// a value receiver, which discards the parsed value after JSON deserialization.
+// The fix: computeCodeActions re-derives codes server-side via computeDiagnostics.
+func TestCodeAction_NilCodeRoundTrip(t *testing.T) {
+	fooContent := `package: foo
+slices:
+  bins:
+    essential:
+      - nonexistent_slice
+    contents:
+      /usr/bin/foo:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"foo.yaml": fooContent})
+	fooPath := filepath.Join(slicesDir, "foo.yaml")
+
+	srv := lsp.NewWithIndex(idx)
+	srv.SetDocForTest(fooPath, fooContent)
+
+	// Simulate exactly what a real LSP client sends: the diagnostic range is
+	// correct but Code is nil (lost through JSON deserialization due to the
+	// glsp IntegerOrString.UnmarshalJSON value-receiver bug).
+	clientDiags := []protocol.Diagnostic{
+		{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 4, Character: 8},
+				End:   protocol.Position{Line: 4, Character: 24},
+			},
+			// Code intentionally nil — simulates the broken round-trip
+			Message: "unknown slice reference",
+		},
+	}
+
+	actions := srv.ExportCodeAction(fooPath, clientDiags)
+	found := false
+	for _, a := range actions {
+		if a.Title == "Remove unknown reference" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'Remove unknown reference' even with nil Code (broken round-trip), got: %v", actions)
+	}
+}
+
 func TestCodeAction_AllDiagnosticsHaveCodes(t *testing.T) {
 	fooContent := `package: wrongname
 slices:

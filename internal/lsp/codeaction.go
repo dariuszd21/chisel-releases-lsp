@@ -42,12 +42,27 @@ func (s *Server) computeCodeActions(
 	}
 	lines := strings.Split(doc, "\n")
 
+	// glsp's IntegerOrString.UnmarshalJSON uses a value receiver, so the
+	// diagnostic Code.Value is always nil after JSON deserialization. Re-compute
+	// diagnostics server-side to build a reliable line→code map and use that
+	// instead of the (broken) client-reflected codes.
+	lineCode := make(map[uint32]string)
+	for _, d := range s.computeDiagnostics(filePath) {
+		if d.Code != nil {
+			if c, ok := d.Code.Value.(string); ok {
+				lineCode[d.Range.Start.Line] = c
+			}
+		}
+	}
+
 	var actions []protocol.CodeAction
 	for _, diag := range clientDiags {
-		if diag.Code == nil {
-			continue
+		// Resolve code: prefer freshly-computed server value; fall back to
+		// whatever the client sent (works if the client fixed the round-trip).
+		code := lineCode[diag.Range.Start.Line]
+		if code == "" && diag.Code != nil {
+			code, _ = diag.Code.Value.(string)
 		}
-		code, _ := diag.Code.Value.(string)
 		switch code {
 		case DiagCodeUnknownSliceRef, DiagCodeInvalidSliceRef:
 			lineNum := int(diag.Range.Start.Line)
