@@ -88,17 +88,21 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
 - **Rename** (`F2`) renames a slice key in its definition file and updates every `essential:` reference across the release.
 - **Diagnostics** are published on open, change, and save:
   - Invalid glob patterns in `contents:` paths.
-  - Cross-package path collisions (two packages claiming the same concrete path).
+  - Cross-package path collisions (two packages claiming the same concrete path). Each diagnostic includes `relatedInformation` pointing to the conflicting file so editors can navigate there directly.
   - Unknown or malformed slice references in `essential:` lists.
   - `package:` value that does not match the file's name stem (e.g. `openssl.yaml` must declare `package: openssl`).
-- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references and package name mismatches.
+  - Duplicate slice definitions — the same `pkg_slice` key declared in more than one file.
+- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, and a *Go to conflicting slice* action for path collisions.
 - **Hover** renders a markdown summary of a slice's contents and its own essential dependencies.
+- **v3 format** (`essential:` as a YAML mapping with optional per-entry arch filters) is fully supported alongside the classic v1/v2 sequence format.
 
 ---
 
 ## Slice definition format
 
-A slice definition file lives at `slices/<package>.yaml`:
+A slice definition file lives at `slices/<package>.yaml`.
+
+**v1/v2 format** — `essential:` as a sequence:
 
 ```yaml
 package: mypkg
@@ -120,6 +124,21 @@ slices:
       /etc/mypkg.d/:   {make: true}
 ```
 
+**v3 format** — `essential:` as a mapping with optional per-entry arch filters:
+
+```yaml
+package: mypkg
+
+slices:
+  bins:
+    essential:
+      libc6_libs:               # unconditional dependency
+      libgcc-s1_libs:
+        arch: amd64             # only on amd64
+    contents:
+      /usr/bin/mybin:
+```
+
 See the [chisel documentation](https://documentation.ubuntu.com/chisel/en/latest/) for the full schema reference.
 
 ---
@@ -133,6 +152,8 @@ go test ./...
 # Build
 go build ./cmd/chisel-releases-lsp
 ```
+
+> **Note (this repo):** `go` is installed as a snap. Prefix all commands with `snap run go …` and use `snap run go fmt ./...` instead of `gofmt`. See [`.github/copilot-instructions.md`](.github/copilot-instructions.md) for the exact CI check sequence.
 
 ### Project layout
 
@@ -200,6 +221,9 @@ require('lspconfig').chisel_releases_lsp.setup({
 ## Roadmap
 
 - [x] Rename refactoring for slice names
+- [x] Duplicate slice detection (same `pkg_slice` in multiple files)
+- [x] v3 map-style `essential:` format support
+- [x] Collision `relatedInformation` + `gotoConflict` code action
 - [ ] Remote chisel-releases (pull from `canonical/chisel-releases` GitHub branches)
 - [ ] TCP/socket transport in addition to stdio
 - [ ] Schema validation for `chisel.yaml`
