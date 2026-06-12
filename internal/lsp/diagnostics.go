@@ -142,6 +142,17 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		}
 	}
 
+	// 6. Missing copyright essential in slice definitions.
+	for _, d := range analysis.CheckCopyrightEssential(filePath, sf) {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.Range),
+			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
+			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeMissingCopyright),
+			Message:  d.Message,
+		})
+	}
+
 	return diags
 }
 

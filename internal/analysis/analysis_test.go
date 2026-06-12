@@ -404,3 +404,103 @@ slices:
 		t.Errorf("expected sorted by SliceName, got [%s, %s]", dups[0].SliceName, dups[1].SliceName)
 	}
 }
+
+func TestCheckCopyrightEssential_MissingInSlice(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: openssl
+slices:
+  libs:
+    contents:
+      /usr/lib/libssl.so:
+  bins:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/bin/openssl:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diags := analysis.CheckCopyrightEssential("openssl.yaml", sf)
+	// Both libs and bins are missing openssl_copyright
+	if len(diags) != 2 {
+		t.Fatalf("expected 2 diagnostics, got %d: %v", len(diags), diags)
+	}
+	for _, d := range diags {
+		if !strings.Contains(d.Message, "openssl_copyright") {
+			t.Errorf("unexpected message: %s", d.Message)
+		}
+		if d.Severity != analysis.SeverityWarning {
+			t.Errorf("expected Warning severity, got %v", d.Severity)
+		}
+	}
+}
+
+func TestCheckCopyrightEssential_SliceLevelCoversIt(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: openssl
+slices:
+  libs:
+    essential:
+      - openssl_copyright
+    contents:
+      /usr/lib/libssl.so:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diags := analysis.CheckCopyrightEssential("openssl.yaml", sf)
+	if len(diags) != 0 {
+		t.Fatalf("expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestCheckCopyrightEssential_PackageLevelCoversAll(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: openssl
+essential:
+  - openssl_copyright
+slices:
+  libs:
+    contents:
+      /usr/lib/libssl.so:
+  bins:
+    contents:
+      /usr/bin/openssl:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diags := analysis.CheckCopyrightEssential("openssl.yaml", sf)
+	if len(diags) != 0 {
+		t.Fatalf("expected no diagnostics (package-level covers all), got %d: %v", len(diags), diags)
+	}
+}
+
+func TestCheckCopyrightEssential_CopyrightSliceExempt(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: openssl
+slices:
+  copyright:
+    contents:
+      /usr/share/doc/openssl/copyright:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diags := analysis.CheckCopyrightEssential("openssl.yaml", sf)
+	if len(diags) != 0 {
+		t.Fatalf("copyright slice should be exempt, got %d diagnostics: %v", len(diags), diags)
+	}
+}
+
+func TestCheckCopyrightEssential_NoPackage(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`slices:
+  libs:
+    contents:
+      /usr/lib/foo:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diags := analysis.CheckCopyrightEssential("foo.yaml", sf)
+	if len(diags) != 0 {
+		t.Fatalf("no package → no diagnostics, got %d: %v", len(diags), diags)
+	}
+}

@@ -801,8 +801,15 @@ func TestComputeDiagnostics_CleanFileReturnsEmpty(t *testing.T) {
 	// clears any previously shown squiggles.
 	idx, slicesDir := setupLSPIndex(t, map[string]string{
 		"libc6.yaml": `package: libc6
+essential:
+  - libc6_copyright
 slices:
+  copyright:
+    contents:
+      /usr/share/doc/libc6/copyright:
   libs:
+    essential:
+      - libc6_copyright
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
@@ -1562,8 +1569,15 @@ slices:
 func TestReindexAndPublish_CleanFile(t *testing.T) {
 	idx, slicesDir := setupLSPIndex(t, map[string]string{
 		"libc6.yaml": `package: libc6
+essential:
+  - libc6_copyright
 slices:
+  copyright:
+    contents:
+      /usr/share/doc/libc6/copyright:
   libs:
+    essential:
+      - libc6_copyright
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
@@ -1572,8 +1586,15 @@ slices:
 	srv := lsp.NewWithIndex(idx)
 	n := &recordingNotifier{}
 	cleanContent := []byte(`package: libc6
+essential:
+  - libc6_copyright
 slices:
+  copyright:
+    contents:
+      /usr/share/doc/libc6/copyright:
   libs:
+    essential:
+      - libc6_copyright
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `)
@@ -2625,5 +2646,185 @@ slices:
 	}
 	if !found {
 		t.Errorf("expected unknown-ref diagnostic for v3 map-style entry, got: %v", diags)
+	}
+}
+
+// TestComputeDiagnostics_MissingCopyright verifies that the LSP layer emits a
+// missing-copyright-essential warning when a slice has no copyright essential.
+func TestComputeDiagnostics_MissingCopyright(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
+slices:
+  copyright:
+    contents:
+      /usr/share/doc/openssl/copyright:
+  libs:
+    contents:
+      /usr/lib/libssl.so:
+`,
+	})
+
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "openssl.yaml")
+	diags := srv.ExportComputeDiagnostics(filePath)
+
+	var found bool
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "missing-copyright-essential" {
+				found = true
+				if d.Severity == nil || *d.Severity != protocol.DiagnosticSeverityWarning {
+					t.Errorf("expected Warning severity")
+				}
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected missing-copyright-essential diagnostic, got: %v", diags)
+	}
+}
+
+// TestComputeDiagnostics_MissingCopyright_PackageLevelCovers verifies that when
+// the package-level essential lists the copyright slice, no warning is emitted.
+func TestComputeDiagnostics_MissingCopyright_PackageLevelCovers(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
+essential:
+  - openssl_copyright
+slices:
+  copyright:
+    contents:
+      /usr/share/doc/openssl/copyright:
+  libs:
+    contents:
+      /usr/lib/libssl.so:
+`,
+	})
+
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "openssl.yaml")
+	diags := srv.ExportComputeDiagnostics(filePath)
+
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "missing-copyright-essential" {
+				t.Errorf("unexpected missing-copyright-essential diagnostic (package-level should cover): %v", d)
+			}
+		}
+	}
+}
+
+// TestCodeAction_MissingCopyright_NoEssentialBlock verifies that the code action
+// for a missing-copyright-essential diagnostic inserts a new essential: block
+// when none exists.
+func TestCodeAction_MissingCopyright_NoEssentialBlock(t *testing.T) {
+	content := `package: openssl
+slices:
+  libs:
+    contents:
+      /usr/lib/libssl.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"openssl.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "openssl.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+
+	// Find the missing-copyright diagnostic.
+	var copyrightDiag *protocol.Diagnostic
+	for i := range diags {
+		if diags[i].Code != nil {
+			if code, ok := diags[i].Code.Value.(string); ok && code == "missing-copyright-essential" {
+				copyrightDiag = &diags[i]
+				break
+			}
+		}
+	}
+	if copyrightDiag == nil {
+		t.Fatal("expected missing-copyright-essential diagnostic, got none")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{*copyrightDiag})
+	if len(actions) == 0 {
+		t.Fatal("expected at least one code action, got none")
+	}
+
+	var fixAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Edit != nil {
+			fixAction = &actions[i]
+			break
+		}
+	}
+	if fixAction == nil {
+		t.Fatal("expected a code action with workspace edit")
+	}
+	uri := lsp.ExportFilePathToURI(filePath)
+	edits := fixAction.Edit.Changes[uri]
+	if len(edits) == 0 {
+		t.Fatal("expected at least one text edit")
+	}
+	combined := edits[0].NewText
+	if !strings.Contains(combined, "essential:") || !strings.Contains(combined, "openssl_copyright") {
+		t.Errorf("expected edit to contain 'essential:' and 'openssl_copyright', got: %q", combined)
+	}
+}
+
+// TestCodeAction_MissingCopyright_ExistingEssentialBlock verifies that the code
+// action inserts "- openssl_copyright" into an existing essential: block (not
+// creating a duplicate block).
+func TestCodeAction_MissingCopyright_ExistingEssentialBlock(t *testing.T) {
+	content := `package: openssl
+slices:
+  libs:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/lib/libssl.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"openssl.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "openssl.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+
+	var copyrightDiag *protocol.Diagnostic
+	for i := range diags {
+		if diags[i].Code != nil {
+			if code, ok := diags[i].Code.Value.(string); ok && code == "missing-copyright-essential" {
+				copyrightDiag = &diags[i]
+				break
+			}
+		}
+	}
+	if copyrightDiag == nil {
+		t.Fatal("expected missing-copyright-essential diagnostic, got none")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{*copyrightDiag})
+	var fixAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Edit != nil {
+			fixAction = &actions[i]
+			break
+		}
+	}
+	if fixAction == nil {
+		t.Fatal("expected a code action with workspace edit")
+	}
+	uri := lsp.ExportFilePathToURI(filePath)
+	edits := fixAction.Edit.Changes[uri]
+	if len(edits) == 0 {
+		t.Fatal("expected at least one text edit")
+	}
+	newText := edits[0].NewText
+	// Should only insert the item, not create a new essential: block.
+	if strings.Contains(newText, "essential:") {
+		t.Errorf("expected insert-only edit (no new 'essential:' keyword), got: %q", newText)
+	}
+	if !strings.Contains(newText, "openssl_copyright") {
+		t.Errorf("expected edit to contain 'openssl_copyright', got: %q", newText)
 	}
 }

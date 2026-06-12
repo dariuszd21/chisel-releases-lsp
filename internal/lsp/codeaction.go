@@ -141,9 +141,78 @@ func (s *Server) computeCodeActions(
 				})
 				break
 			}
+		case DiagCodeMissingCopyright:
+			if s.idx == nil {
+				continue
+			}
+			sf := s.idx.FileSliceFile(filePath)
+			if sf == nil {
+				continue
+			}
+			pkg := sf.Package
+			copyrightRef := pkg + "_copyright"
+			edit, ok := insertCopyrightEdit(lines, int(diag.Range.Start.Line), pkg)
+			if !ok {
+				continue
+			}
+			actions = append(actions, protocol.CodeAction{
+				Title:       fmt.Sprintf("Add %q to slice essentials", copyrightRef),
+				Kind:        &quickFix,
+				Diagnostics: []protocol.Diagnostic{diag},
+				IsPreferred: &trueVal,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+						uri: {edit},
+					},
+				},
+			})
 		}
 	}
 	return actions
+}
+
+// insertCopyrightEdit computes a TextEdit that inserts "- <pkg>_copyright" into
+// the slice at diagLine. If the slice already has an essential: block, the new
+// entry is added as the first item. If not, a new essential: block is inserted
+// right after the slice name line. Returns (edit, true) on success.
+func insertCopyrightEdit(lines []string, diagLine int, pkg string) (protocol.TextEdit, bool) {
+	if diagLine < 0 || diagLine >= len(lines) {
+		return protocol.TextEdit{}, false
+	}
+	sliceLine := lines[diagLine]
+	sliceIndent := len(sliceLine) - len(strings.TrimLeft(sliceLine, " \t"))
+	childIndent := strings.Repeat(" ", sliceIndent+2)
+	itemIndent := strings.Repeat(" ", sliceIndent+4)
+	copyrightRef := pkg + "_copyright"
+
+	// Scan forward to find an existing essential: block or the end of this slice.
+	for i := diagLine + 1; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if indent <= sliceIndent {
+			// Hit sibling or parent — no essential: block found.
+			break
+		}
+		if trimmed == "essential:" {
+			// Insert as the first item of the existing essential: block.
+			insertPos := protocol.Position{Line: uint32(i + 1), Character: 0}
+			return protocol.TextEdit{
+				Range:   protocol.Range{Start: insertPos, End: insertPos},
+				NewText: itemIndent + "- " + copyrightRef + "\n",
+			}, true
+		}
+	}
+
+	// No essential: block — create one right after the slice name line.
+	insertPos := protocol.Position{Line: uint32(diagLine + 1), Character: 0}
+	return protocol.TextEdit{
+		Range:   protocol.Range{Start: insertPos, End: insertPos},
+		NewText: childIndent + "essential:\n" + itemIndent + "- " + copyrightRef + "\n",
+	}, true
 }
 
 // isListItemLine reports whether the line at lineNum (0-indexed, within lines)

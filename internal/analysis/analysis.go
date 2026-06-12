@@ -192,6 +192,51 @@ func isGlob(p string) bool {
 	return strings.ContainsAny(p, "*?[")
 }
 
+// CheckCopyrightEssential returns a Warning diagnostic for every slice that does
+// not reference <pkg>_copyright in its effective essentials (package-level or
+// slice-level). The copyright slice itself is exempt.
+func CheckCopyrightEssential(filePath string, sf *parser.SliceFile) []Diagnostic {
+	if sf.Package == "" {
+		return nil
+	}
+	target := sf.Package + "_copyright"
+
+	// If the package-level essential already includes the copyright ref,
+	// all slices inherit it — nothing to warn about.
+	for _, ref := range sf.Essential {
+		if ref.Value == target {
+			return nil
+		}
+	}
+
+	var diags []Diagnostic
+	for _, sliceName := range sf.SliceOrder {
+		if sliceName == "copyright" {
+			continue
+		}
+		sd := sf.Slices[sliceName]
+		found := false
+		for _, ref := range sd.Essential {
+			if ref.Value == target {
+				found = true
+				break
+			}
+		}
+		if !found {
+			diags = append(diags, Diagnostic{
+				File:  filePath,
+				Range: sd.NameRange,
+				Message: fmt.Sprintf(
+					"slice %q is missing essential %q",
+					sliceName, target,
+				),
+				Severity: SeverityWarning,
+			})
+		}
+	}
+	return diags
+}
+
 // DuplicateSlice describes two files that both define the same package+slice name.
 // The second definition silently overwrites the first in the index, so the user
 // may see inconsistent hover/reference results without realising why.
