@@ -23,6 +23,7 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 | **Package name check** — warn when `package:` value doesn't match the filename stem | `textDocument/publishDiagnostics` |
 | **Hover documentation** — show a slice's contents and essential dependencies | `textDocument/hover` |
 | **Duplicate slice detection** — warn when the same `pkg_slice` is defined in more than one file | `textDocument/publishDiagnostics` |
+| **Missing copyright essential** — warn when a slice doesn't reference `<pkg>_copyright` | `textDocument/publishDiagnostics` |
 
 ---
 
@@ -92,6 +93,7 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
   - Unknown or malformed slice references in `essential:` lists.
   - `package:` value that does not match the file's name stem (e.g. `openssl.yaml` must declare `package: openssl`).
   - Duplicate slice definitions — the same `pkg_slice` key declared in more than one file.
+  - Missing copyright essential — a slice that doesn't reference `<pkg>_copyright` in its effective essentials (package-level or slice-level); the `copyright` slice itself is exempt.
 - **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, and a *Go to conflicting slice* action for path collisions.
 - **Hover** renders a markdown summary of a slice's contents and its own essential dependencies.
 - **v3 format** (`essential:` as a YAML mapping with optional per-entry arch filters) is fully supported alongside the classic v1/v2 sequence format.
@@ -224,6 +226,7 @@ require('lspconfig').chisel_releases_lsp.setup({
 - [x] Duplicate slice detection (same `pkg_slice` in multiple files)
 - [x] v3 map-style `essential:` format support
 - [x] Collision `relatedInformation` + `gotoConflict` code action
+- [x] Missing copyright essential diagnostic + quick fix
 - [ ] Remote chisel-releases (pull from `canonical/chisel-releases` GitHub branches)
 - [ ] TCP/socket transport in addition to stdio
 - [ ] Schema validation for `chisel.yaml`
