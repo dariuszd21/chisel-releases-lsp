@@ -63,6 +63,8 @@ Stateless analysis passes that return structured diagnostics (not `protocol.Diag
 - `ValidateGlobs` — validates `contents:` paths
 - `DetectCollisions` — cross-file concrete-path conflicts
 - `CheckPackageName` — filename stem must equal `package:` value
+- `DetectDuplicateSlices` — same `pkg_slice` defined in more than one file
+- `CheckCopyrightEssential` — each slice must reference `<pkg>_copyright` in effective essentials; copyright slice is exempt
 
 ### `internal/lsp`
 glsp-based server. `Server` struct owns the index, open-document map, and a `Notifier`. Features are split into files: `completion.go`, `definition.go`, `hover.go`, `references.go`, `rename.go`, `symbol.go`, `codeaction.go`, `diagnostics.go`, `util.go`.
@@ -125,6 +127,7 @@ Shared by `references.go` and `rename.go`. Handles two cursor contexts:
 3. Declare the capability in `initialize()` (`server.go`).
 4. Add `ExportXxx` wrappers to `export_test.go`.
 5. Add tests to `lsp_test.go` using `NewWithIndex` + `SetDocForTest`.
+6. **Update `README.md`**: add a row to the features table, describe the behaviour in the "How it works" section, and tick the item in the Roadmap. Do this in the same commit as the feature.
 
 ### Line deletion in code actions
 
