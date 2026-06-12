@@ -8,6 +8,8 @@ import (
 
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
+
+	"github.com/dariuszd21/chisel-releases-lsp/internal/analysis"
 )
 
 func (s *Server) textDocumentCodeAction(_ *glsp.Context, params *protocol.CodeActionParams) (any, error) {
@@ -103,6 +105,42 @@ func (s *Server) computeCodeActions(
 					},
 				},
 			})
+
+		case DiagCodeSliceCollision:
+			// Find the conflicting location from the collision map so we can
+			// offer "Go to conflicting slice" navigation.
+			if s.idx == nil {
+				continue
+			}
+			lineNum := diag.Range.Start.Line
+			for _, col := range analysis.DetectCollisions(s.idx) {
+				var otherURI string
+				var otherLine, otherChar uint32
+				if col.FileA == filePath && col.RangeA.Start.Line == int(lineNum) {
+					otherURI = string(filePathToURI(col.FileB))
+					otherLine = uint32(col.RangeB.Start.Line)
+					otherChar = uint32(col.RangeB.Start.Character)
+				} else if col.FileB == filePath && col.RangeB.Start.Line == int(lineNum) {
+					otherURI = string(filePathToURI(col.FileA))
+					otherLine = uint32(col.RangeA.Start.Line)
+					otherChar = uint32(col.RangeA.Start.Character)
+				}
+				if otherURI == "" {
+					continue
+				}
+				actionKind := protocol.CodeActionKindEmpty
+				actions = append(actions, protocol.CodeAction{
+					Title:       fmt.Sprintf("Go to conflicting slice in %s", filepath.Base(col.FileA)),
+					Kind:        &actionKind,
+					Diagnostics: []protocol.Diagnostic{diag},
+					Command: &protocol.Command{
+						Title:   "Go to conflicting slice",
+						Command: CmdGotoConflict,
+						Arguments: []any{otherURI, float64(otherLine), float64(otherChar)},
+					},
+				})
+				break
+			}
 		}
 	}
 	return actions

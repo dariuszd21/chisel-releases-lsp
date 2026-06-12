@@ -618,6 +618,184 @@ slices:
 	}
 }
 
+// TestComputeDiagnostics_Collision verifies that a cross-package path conflict
+// is reported as a slice-collision diagnostic through the LSP diagnostic layer.
+func TestComputeDiagnostics_Collision(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
+slices:
+  libs:
+    contents:
+      /shared/path:
+`,
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /shared/path:
+`,
+	})
+
+	srv := lsp.NewWithIndex(idx)
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	diags := srv.ExportComputeDiagnostics(opensslPath)
+
+	found := false
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "slice-collision" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected slice-collision diagnostic for openssl.yaml, got: %v", diags)
+	}
+}
+
+// TestComputeDiagnostics_Collision_RelatedInfo verifies that a collision diagnostic
+// includes RelatedInformation pointing to the other conflicting file/range.
+func TestComputeDiagnostics_Collision_RelatedInfo(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
+slices:
+  libs:
+    contents:
+      /shared/path:
+`,
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /shared/path:
+`,
+	})
+
+	srv := lsp.NewWithIndex(idx)
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+	libc6Path := filepath.Join(slicesDir, "libc6.yaml")
+	diags := srv.ExportComputeDiagnostics(opensslPath)
+
+	var collisionDiag *protocol.Diagnostic
+	for i := range diags {
+		if diags[i].Code != nil {
+			if code, ok := diags[i].Code.Value.(string); ok && code == "slice-collision" {
+				collisionDiag = &diags[i]
+				break
+			}
+		}
+	}
+	if collisionDiag == nil {
+		t.Fatal("expected slice-collision diagnostic, got none")
+	}
+	if len(collisionDiag.RelatedInformation) == 0 {
+		t.Fatal("expected RelatedInformation on collision diagnostic, got none")
+	}
+	rel := collisionDiag.RelatedInformation[0]
+	expectedURI := lsp.ExportFilePathToURI(libc6Path)
+	if rel.Location.URI != expectedURI {
+		t.Errorf("RelatedInformation URI: got %q, want %q", rel.Location.URI, expectedURI)
+	}
+	if !strings.Contains(rel.Message, "libc6") {
+		t.Errorf("RelatedInformation message should mention libc6: %q", rel.Message)
+	}
+}
+
+// TestCodeAction_Collision_OffersGoto verifies that a code action is offered
+// for a slice-collision diagnostic, providing a "Go to conflicting slice" command.
+func TestCodeAction_Collision_OffersGoto(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
+slices:
+  libs:
+    contents:
+      /shared/path:
+`,
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /shared/path:
+`,
+	})
+
+	srv := lsp.NewWithIndex(idx)
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+
+	// Get the server-computed collision diagnostic (with proper code).
+	diags := srv.ExportComputeDiagnostics(opensslPath)
+	var collisionDiags []protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil {
+			if code, ok := d.Code.Value.(string); ok && code == "slice-collision" {
+				collisionDiags = append(collisionDiags, d)
+			}
+		}
+	}
+	if len(collisionDiags) == 0 {
+		t.Fatal("expected collision diagnostic, got none")
+	}
+
+	actions := srv.ExportCodeAction(opensslPath, collisionDiags)
+	found := false
+	for _, a := range actions {
+		if a.Command != nil && a.Command.Command == "chisel-releases-lsp.gotoConflict" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected gotoConflict code action for collision, got: %v", actions)
+	}
+}
+
+// TestCodeAction_Collision_NilCodeRoundTrip verifies that the gotoConflict code
+// action is returned even when client diagnostics have Code == nil (the glsp
+// IntegerOrString round-trip bug). The fix is the same lineCode lookup used for
+// other diagnostic types.
+func TestCodeAction_Collision_NilCodeRoundTrip(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"openssl.yaml": `package: openssl
+slices:
+  libs:
+    contents:
+      /shared/path:
+`,
+		"libc6.yaml": `package: libc6
+slices:
+  libs:
+    contents:
+      /shared/path:
+`,
+	})
+
+	srv := lsp.NewWithIndex(idx)
+	opensslPath := filepath.Join(slicesDir, "openssl.yaml")
+
+	// Simulate client-reflected diagnostics with Code == nil.
+	// "/shared/path:" is on line 4 (0-based) of openssl.yaml.
+	clientDiags := []protocol.Diagnostic{
+		{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 4, Character: 6},
+				End:   protocol.Position{Line: 4, Character: 19},
+			},
+			// Code intentionally nil — simulates the broken round-trip
+			Message: "slice collision",
+		},
+	}
+
+	actions := srv.ExportCodeAction(opensslPath, clientDiags)
+	found := false
+	for _, a := range actions {
+		if a.Command != nil && a.Command.Command == "chisel-releases-lsp.gotoConflict" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected gotoConflict action even with nil Code, got: %v", actions)
+	}
+}
+
 func TestComputeDiagnostics_CleanFileReturnsEmpty(t *testing.T) {
 	// A valid file with no issues must return [] (not nil) so that the client
 	// clears any previously shown squiggles.

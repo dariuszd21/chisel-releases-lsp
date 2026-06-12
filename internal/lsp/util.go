@@ -56,6 +56,10 @@ const (
 	DiagCodeDuplicateSlice      = "duplicate-slice"
 )
 
+// CmdGotoConflict is the workspace/executeCommand command name for navigating
+// to the file that conflicts with a slice-collision diagnostic.
+const CmdGotoConflict = "chisel-releases-lsp.gotoConflict"
+
 // diagCodePtr wraps a diagnostic code string into the protocol's IntegerOrString type.
 func diagCodePtr(code string) *protocol.IntegerOrString {
 	return &protocol.IntegerOrString{Value: code}

@@ -63,6 +63,15 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 				Source:   strPtr("chisel-releases-lsp"),
 				Code:     diagCodePtr(DiagCodeSliceCollision),
 				Message:  fmt.Sprintf("slice collision: path %q also claimed by %s", col.Path, col.SliceB),
+				RelatedInformation: []protocol.DiagnosticRelatedInformation{
+					{
+						Location: protocol.Location{
+							URI:   filePathToURI(col.FileB),
+							Range: toProtocolRange(col.RangeB),
+						},
+						Message: fmt.Sprintf("%s also claims %q", col.SliceB, col.Path),
+					},
+				},
 			})
 		}
 		if col.FileB == filePath {
@@ -72,6 +81,15 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 				Source:   strPtr("chisel-releases-lsp"),
 				Code:     diagCodePtr(DiagCodeSliceCollision),
 				Message:  fmt.Sprintf("slice collision: path %q also claimed by %s", col.Path, col.SliceA),
+				RelatedInformation: []protocol.DiagnosticRelatedInformation{
+					{
+						Location: protocol.Location{
+							URI:   filePathToURI(col.FileA),
+							Range: toProtocolRange(col.RangeA),
+						},
+						Message: fmt.Sprintf("%s also claims %q", col.SliceA, col.Path),
+					},
+				},
 			})
 		}
 	}

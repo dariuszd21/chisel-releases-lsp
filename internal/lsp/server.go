@@ -80,6 +80,7 @@ func New() *Server {
 		TextDocumentPrepareRename:       s.textDocumentPrepareRename,
 		TextDocumentCodeAction:          s.textDocumentCodeAction,
 		WorkspaceDidChangeConfiguration: s.workspaceDidChangeConfiguration,
+		WorkspaceExecuteCommand:         s.workspaceExecuteCommand,
 	}
 	return s
 }
@@ -151,6 +152,9 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 			CodeActionProvider: &protocol.CodeActionOptions{
 				CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
 			},
+				ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
+					Commands: []string{CmdGotoConflict},
+				},
 		},
 		ServerInfo: &protocol.InitializeResultServerInfo{
 			Name:    lsName,
@@ -246,6 +250,9 @@ func (s *Server) reindexAndPublish(n Notifier, filePath string, content []byte) 
 	}
 	s.idx.UpdateFile(filePath, sf)
 	s.publishDiagnosticsForFile(n, filePath)
+	// Republish all other open files: cross-file analysis (collision detection)
+	// may produce different results for them after this file was updated.
+	s.republishOpenFiles(n, filePath)
 }
 
 func (s *Server) setDoc(filePath, text string) {
@@ -298,6 +305,40 @@ func (s *Server) workspaceDidChangeConfiguration(_ *glsp.Context, params *protoc
 		s.applySettings(params.Settings)
 	}
 	return nil
+}
+
+// workspaceExecuteCommand handles workspace/executeCommand requests.
+// The only command currently supported is CmdGotoConflict, which navigates
+// the editor to the conflicting file/range via a window/showDocument notification.
+func (s *Server) workspaceExecuteCommand(ctx *glsp.Context, params *protocol.ExecuteCommandParams) (any, error) {
+	if params.Command != CmdGotoConflict {
+		return nil, nil
+	}
+	// Arguments: [uri string, line uint32, character uint32]
+	if len(params.Arguments) < 3 {
+		return nil, nil
+	}
+	uri, ok1 := params.Arguments[0].(string)
+	lineF, ok2 := params.Arguments[1].(float64) // JSON numbers unmarshal as float64
+	charF, ok3 := params.Arguments[2].(float64)
+	if !ok1 || !ok2 || !ok3 {
+		return nil, nil
+	}
+	line := uint32(lineF)
+	char := uint32(charF)
+	sel := protocol.Range{
+		Start: protocol.Position{Line: line, Character: char},
+		End:   protocol.Position{Line: line, Character: char},
+	}
+	takeFocus := true
+	external := false
+	ctx.Notify(string(protocol.ServerWindowShowDocument), protocol.ShowDocumentParams{
+		URI:       protocol.URI(uri),
+		External:  &external,
+		TakeFocus: &takeFocus,
+		Selection: &sel,
+	})
+	return nil, nil
 }
 
 // applySettings extracts configuration values from v (which may be a
