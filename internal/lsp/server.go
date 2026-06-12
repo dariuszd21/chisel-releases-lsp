@@ -152,9 +152,9 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 			CodeActionProvider: &protocol.CodeActionOptions{
 				CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
 			},
-				ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-					Commands: []string{CmdGotoConflict},
-				},
+			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
+				Commands: []string{CmdGotoConflict},
+			},
 		},
 		ServerInfo: &protocol.InitializeResultServerInfo{
 			Name:    lsName,

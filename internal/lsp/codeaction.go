@@ -134,8 +134,8 @@ func (s *Server) computeCodeActions(
 					Kind:        &actionKind,
 					Diagnostics: []protocol.Diagnostic{diag},
 					Command: &protocol.Command{
-						Title:   "Go to conflicting slice",
-						Command: CmdGotoConflict,
+						Title:     "Go to conflicting slice",
+						Command:   CmdGotoConflict,
 						Arguments: []any{otherURI, float64(otherLine), float64(otherChar)},
 					},
 				})
