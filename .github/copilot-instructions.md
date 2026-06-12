@@ -24,8 +24,8 @@ snap run go test -cover ./internal/lsp/...
 **Full CI check (run all three before committing):**
 
 ```bash
-# 1. Formatting — must produce no output
-gofmt -l .
+# 1. Format all files in-place (gofmt is at /snap/go/current/bin/gofmt)
+snap run go fmt ./...
 
 # 2. Build + test
 snap run go build ./...
