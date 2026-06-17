@@ -290,3 +290,41 @@ func DetectDuplicateSlices(idx *index.Index) []DuplicateSlice {
 	})
 	return dups
 }
+
+// DuplicateEssential describes a repeated pkg_slice reference within a single
+// essential: block (package-level or per-slice).
+type DuplicateEssential struct {
+	File      string
+	SliceName string // empty for package-level essential
+	FirstRef  parser.EssentialRef
+	DupRef    parser.EssentialRef
+}
+
+// CheckDuplicateEssentials returns a Warning diagnostic for every essential
+// reference that appears more than once in the same essential: block. Package-level
+// and per-slice blocks are checked independently.
+func CheckDuplicateEssentials(filePath string, sf *parser.SliceFile) []DuplicateEssential {
+	var result []DuplicateEssential
+
+	check := func(sliceName string, refs []parser.EssentialRef) {
+		seen := make(map[string]parser.EssentialRef)
+		for _, ref := range refs {
+			if first, exists := seen[ref.Value]; exists {
+				result = append(result, DuplicateEssential{
+					File:      filePath,
+					SliceName: sliceName,
+					FirstRef:  first,
+					DupRef:    ref,
+				})
+			} else {
+				seen[ref.Value] = ref
+			}
+		}
+	}
+
+	check("", sf.Essential)
+	for _, sliceName := range sf.SliceOrder {
+		check(sliceName, sf.Slices[sliceName].Essential)
+	}
+	return result
+}

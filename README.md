@@ -24,6 +24,7 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 | **Hover documentation** — show a slice's contents and essential dependencies | `textDocument/hover` |
 | **Duplicate slice detection** — warn when the same `pkg_slice` is defined in more than one file | `textDocument/publishDiagnostics` |
 | **Missing copyright essential** — warn when a slice doesn't reference `<pkg>_copyright` | `textDocument/publishDiagnostics` |
+| **Duplicate essential references** — warn when the same `pkg_slice` appears more than once in the same `essential:` block | `textDocument/publishDiagnostics` |
 
 ---
 
@@ -94,6 +95,7 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
   - `package:` value that does not match the file's name stem (e.g. `openssl.yaml` must declare `package: openssl`).
   - Duplicate slice definitions — the same `pkg_slice` key declared in more than one file.
   - Missing copyright essential — a slice that doesn't reference `<pkg>_copyright` in its effective essentials (package-level or slice-level); the `copyright` slice itself is exempt.
+  - Duplicate essential references — the same `pkg_slice` listed more than once in the same `essential:` block; diagnostics include `relatedInformation` pointing to the first occurrence.
 - **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, a *Go to conflicting slice* action for path collisions, and *Add `<pkg>_copyright` to package essentials* for the missing-copyright diagnostic (inserts into the top-level `essential:` block, covering all slices at once; format matches the file's existing v1/v2 or v3 style).
 - **Hover** renders a markdown summary of a slice's contents and its own essential dependencies.
 - **v3 format** (`essential:` as a YAML mapping with optional per-entry arch filters) is fully supported alongside the classic v1/v2 sequence format.
@@ -227,6 +229,7 @@ require('lspconfig').chisel_releases_lsp.setup({
 - [x] v3 map-style `essential:` format support
 - [x] Collision `relatedInformation` + `gotoConflict` code action
 - [x] Missing copyright essential diagnostic + quick fix
+- [x] Duplicate essential reference diagnostic + goto/remove actions
 - [ ] Remote chisel-releases (pull from `canonical/chisel-releases` GitHub branches)
 - [ ] TCP/socket transport in addition to stdio
 - [ ] Schema validation for `chisel.yaml`

@@ -55,11 +55,16 @@ const (
 	DiagCodeUnknownSliceRef     = "unknown-slice-ref"
 	DiagCodeDuplicateSlice      = "duplicate-slice"
 	DiagCodeMissingCopyright    = "missing-copyright-essential"
+	DiagCodeDuplicateEssential  = "duplicate-essential"
 )
 
 // CmdGotoConflict is the workspace/executeCommand command name for navigating
 // to the file that conflicts with a slice-collision diagnostic.
 const CmdGotoConflict = "chisel-releases-lsp.gotoConflict"
+
+// CmdGotoFirstOccurrence is the workspace/executeCommand command name for
+// navigating to the first occurrence of a duplicate essential reference.
+const CmdGotoFirstOccurrence = "chisel-releases-lsp.gotoFirstOccurrence"
 
 // diagCodePtr wraps a diagnostic code string into the protocol's IntegerOrString type.
 func diagCodePtr(code string) *protocol.IntegerOrString {

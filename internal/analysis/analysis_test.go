@@ -504,3 +504,90 @@ func TestCheckCopyrightEssential_NoPackage(t *testing.T) {
 		t.Fatalf("no package → no diagnostics, got %d: %v", len(diags), diags)
 	}
 }
+
+func TestCheckDuplicateEssentials_WithinSlice(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: openssl
+slices:
+  libs:
+    essential:
+      - libc6_libs
+      - libc6_libs
+    contents:
+      /usr/lib/libssl.so:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dups := analysis.CheckDuplicateEssentials("openssl.yaml", sf)
+	if len(dups) != 1 {
+		t.Fatalf("expected 1 duplicate, got %d: %v", len(dups), dups)
+	}
+	if dups[0].DupRef.Value != "libc6_libs" {
+		t.Errorf("expected DupRef libc6_libs, got %q", dups[0].DupRef.Value)
+	}
+	if dups[0].SliceName != "libs" {
+		t.Errorf("expected SliceName libs, got %q", dups[0].SliceName)
+	}
+}
+
+func TestCheckDuplicateEssentials_PackageLevel(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: openssl
+essential:
+  - libc6_libs
+  - libc6_libs
+slices:
+  libs:
+    contents:
+      /usr/lib/libssl.so:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dups := analysis.CheckDuplicateEssentials("openssl.yaml", sf)
+	if len(dups) != 1 {
+		t.Fatalf("expected 1 duplicate, got %d: %v", len(dups), dups)
+	}
+	if dups[0].SliceName != "" {
+		t.Errorf("expected empty SliceName (package-level), got %q", dups[0].SliceName)
+	}
+}
+
+func TestCheckDuplicateEssentials_CrossBlockIndependent(t *testing.T) {
+	// Same ref in package-level AND slice-level is NOT a duplicate (separate blocks).
+	sf, err := parser.ParseBytes([]byte(`package: openssl
+essential:
+  - libc6_libs
+slices:
+  libs:
+    essential:
+      - libc6_libs
+    contents:
+      /usr/lib/libssl.so:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dups := analysis.CheckDuplicateEssentials("openssl.yaml", sf)
+	if len(dups) != 0 {
+		t.Errorf("cross-block duplicates should not be flagged, got %d: %v", len(dups), dups)
+	}
+}
+
+func TestCheckDuplicateEssentials_NoDuplicates(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: openssl
+slices:
+  libs:
+    essential:
+      - libc6_libs
+      - zlib1g_libs
+    contents:
+      /usr/lib/libssl.so:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dups := analysis.CheckDuplicateEssentials("openssl.yaml", sf)
+	if len(dups) != 0 {
+		t.Errorf("expected no duplicates, got %d: %v", len(dups), dups)
+	}
+}

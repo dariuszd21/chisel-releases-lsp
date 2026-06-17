@@ -153,7 +153,7 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 				CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
 			},
 			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-				Commands: []string{CmdGotoConflict},
+				Commands: []string{CmdGotoConflict, CmdGotoFirstOccurrence},
 			},
 		},
 		ServerInfo: &protocol.InitializeResultServerInfo{
@@ -308,13 +308,15 @@ func (s *Server) workspaceDidChangeConfiguration(_ *glsp.Context, params *protoc
 }
 
 // workspaceExecuteCommand handles workspace/executeCommand requests.
-// The only command currently supported is CmdGotoConflict, which navigates
-// the editor to the conflicting file/range via a window/showDocument notification.
+// Supported commands: CmdGotoConflict, CmdGotoFirstOccurrence — both navigate
+// the editor to a target file/range via a window/showDocument notification.
 func (s *Server) workspaceExecuteCommand(ctx *glsp.Context, params *protocol.ExecuteCommandParams) (any, error) {
-	if params.Command != CmdGotoConflict {
+	switch params.Command {
+	case CmdGotoConflict, CmdGotoFirstOccurrence:
+	default:
 		return nil, nil
 	}
-	// Arguments: [uri string, line uint32, character uint32]
+	// Arguments: [uri string, line float64, character float64]
 	if len(params.Arguments) < 3 {
 		return nil, nil
 	}

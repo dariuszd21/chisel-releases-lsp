@@ -141,6 +141,44 @@ func (s *Server) computeCodeActions(
 				})
 				break
 			}
+		case DiagCodeDuplicateEssential:
+			lineNum := int(diag.Range.Start.Line)
+			// Navigation action (preferred): jump to first occurrence via RelatedInformation.
+			// The first-occurrence position is carried in RelatedInformation[0].
+			if len(diag.RelatedInformation) > 0 {
+				firstLoc := diag.RelatedInformation[0].Location
+				actionKind := protocol.CodeActionKindEmpty
+				actions = append(actions, protocol.CodeAction{
+					Title:       "Go to first occurrence",
+					Kind:        &actionKind,
+					Diagnostics: []protocol.Diagnostic{diag},
+					IsPreferred: &trueVal,
+					Command: &protocol.Command{
+						Title:   "Go to first occurrence",
+						Command: CmdGotoFirstOccurrence,
+						Arguments: []any{
+							string(firstLoc.URI),
+							float64(firstLoc.Range.Start.Line),
+							float64(firstLoc.Range.Start.Character),
+						},
+					},
+				})
+			}
+			// Secondary action: remove the duplicate line.
+			if isListItemLine(lines, lineNum) || isYAMLMapKeyLine(lines, lineNum) {
+				editRange := fullLineDeleteRange(lines, lineNum)
+				actions = append(actions, protocol.CodeAction{
+					Title:       "Remove duplicate essential reference",
+					Kind:        &quickFix,
+					Diagnostics: []protocol.Diagnostic{diag},
+					Edit: &protocol.WorkspaceEdit{
+						Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+							uri: {{Range: editRange, NewText: ""}},
+						},
+					},
+				})
+			}
+
 		case DiagCodeMissingCopyright:
 			if s.idx == nil {
 				continue

@@ -65,6 +65,7 @@ Stateless analysis passes that return structured diagnostics (not `protocol.Diag
 - `CheckPackageName` — filename stem must equal `package:` value
 - `DetectDuplicateSlices` — same `pkg_slice` defined in more than one file
 - `CheckCopyrightEssential` — each slice must reference `<pkg>_copyright` in effective essentials; copyright slice is exempt
+- `CheckDuplicateEssentials` — same `pkg_slice` listed more than once in the same `essential:` block
 
 ### `internal/lsp`
 glsp-based server. `Server` struct owns the index, open-document map, and a `Notifier`. Features are split into files: `completion.go`, `definition.go`, `hover.go`, `references.go`, `rename.go`, `symbol.go`, `codeaction.go`, `diagnostics.go`, `util.go`.

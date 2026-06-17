@@ -2901,3 +2901,167 @@ slices:
 		t.Errorf("expected v3 format 'openssl_copyright:', got: %q", newText)
 	}
 }
+
+// TestComputeDiagnostics_DuplicateEssential verifies that a duplicate essential
+// reference emits a diagnostic with RelatedInformation pointing to the first occurrence.
+func TestComputeDiagnostics_DuplicateEssential(t *testing.T) {
+	content := `package: openssl
+slices:
+  libs:
+    essential:
+      - libc6_libs
+      - libc6_libs
+    contents:
+      /usr/lib/libssl.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"openssl.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "openssl.yaml")
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+
+	var dupDiag *protocol.Diagnostic
+	for i := range diags {
+		if diags[i].Code != nil {
+			if code, ok := diags[i].Code.Value.(string); ok && code == "duplicate-essential" {
+				dupDiag = &diags[i]
+				break
+			}
+		}
+	}
+	if dupDiag == nil {
+		t.Fatal("expected duplicate-essential diagnostic, got none")
+	}
+	if dupDiag.Severity == nil || *dupDiag.Severity != protocol.DiagnosticSeverityWarning {
+		t.Errorf("expected Warning severity")
+	}
+	if len(dupDiag.RelatedInformation) == 0 {
+		t.Fatal("expected RelatedInformation pointing to first occurrence")
+	}
+	if !strings.Contains(dupDiag.RelatedInformation[0].Message, "first occurrence") {
+		t.Errorf("expected 'first occurrence' in related info message, got %q", dupDiag.RelatedInformation[0].Message)
+	}
+	// Duplicate is on line 5 (0-based), first occurrence on line 4.
+	if dupDiag.Range.Start.Line != 5 {
+		t.Errorf("expected duplicate on line 5, got %d", dupDiag.Range.Start.Line)
+	}
+	firstLine := dupDiag.RelatedInformation[0].Location.Range.Start.Line
+	if firstLine != 4 {
+		t.Errorf("expected first occurrence on line 4, got %d", firstLine)
+	}
+}
+
+// TestCodeAction_DuplicateEssential_GotoPreferred verifies that the "Go to first
+// occurrence" action is the preferred (IsPreferred=true) action.
+func TestCodeAction_DuplicateEssential_GotoPreferred(t *testing.T) {
+	content := `package: openssl
+slices:
+  libs:
+    essential:
+      - libc6_libs
+      - libc6_libs
+    contents:
+      /usr/lib/libssl.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"openssl.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "openssl.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var dupDiag *protocol.Diagnostic
+	for i := range diags {
+		if diags[i].Code != nil {
+			if code, ok := diags[i].Code.Value.(string); ok && code == "duplicate-essential" {
+				dupDiag = &diags[i]
+				break
+			}
+		}
+	}
+	if dupDiag == nil {
+		t.Fatal("expected duplicate-essential diagnostic")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{*dupDiag})
+	if len(actions) < 2 {
+		t.Fatalf("expected at least 2 actions (goto + remove), got %d", len(actions))
+	}
+
+	var gotoAction, removeAction *protocol.CodeAction
+	for i := range actions {
+		a := &actions[i]
+		if a.Command != nil && a.Command.Command == "chisel-releases-lsp.gotoFirstOccurrence" {
+			gotoAction = a
+		}
+		if a.Edit != nil {
+			removeAction = a
+		}
+	}
+	if gotoAction == nil {
+		t.Error("expected a gotoFirstOccurrence action")
+	} else if gotoAction.IsPreferred == nil || !*gotoAction.IsPreferred {
+		t.Error("expected gotoFirstOccurrence to be IsPreferred=true")
+	}
+	if removeAction == nil {
+		t.Error("expected a remove-duplicate edit action")
+	} else if removeAction.IsPreferred != nil && *removeAction.IsPreferred {
+		t.Error("expected remove action to NOT be preferred")
+	}
+}
+
+// TestCodeAction_DuplicateEssential_RemoveEdit verifies that the remove action
+// produces a TextEdit that deletes the duplicate line.
+func TestCodeAction_DuplicateEssential_RemoveEdit(t *testing.T) {
+	content := `package: openssl
+slices:
+  libs:
+    essential:
+      - libc6_libs
+      - libc6_libs
+    contents:
+      /usr/lib/libssl.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"openssl.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "openssl.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var dupDiag *protocol.Diagnostic
+	for i := range diags {
+		if diags[i].Code != nil {
+			if code, ok := diags[i].Code.Value.(string); ok && code == "duplicate-essential" {
+				dupDiag = &diags[i]
+				break
+			}
+		}
+	}
+	if dupDiag == nil {
+		t.Fatal("expected duplicate-essential diagnostic")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{*dupDiag})
+	uri := lsp.ExportFilePathToURI(filePath)
+	var removeAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Edit != nil {
+			removeAction = &actions[i]
+			break
+		}
+	}
+	if removeAction == nil {
+		t.Fatal("expected a remove edit action")
+	}
+	edits := removeAction.Edit.Changes[uri]
+	if len(edits) == 0 {
+		t.Fatal("expected at least one text edit")
+	}
+	// The edit should delete line 5 (the duplicate "- libc6_libs").
+	edit := edits[0]
+	if edit.Range.Start.Line != 5 {
+		t.Errorf("expected delete edit on line 5, got %d", edit.Range.Start.Line)
+	}
+	if edit.NewText != "" {
+		t.Errorf("expected empty NewText (deletion), got %q", edit.NewText)
+	}
+}

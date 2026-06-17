@@ -153,6 +153,26 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		})
 	}
 
+	// 7. Duplicate essential references within the same block.
+	for _, d := range analysis.CheckDuplicateEssentials(filePath, sf) {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.DupRef.ValueRange),
+			Severity: severityPtr(protocol.DiagnosticSeverityWarning),
+			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeDuplicateEssential),
+			Message:  fmt.Sprintf("duplicate essential reference %q", d.DupRef.Value),
+			RelatedInformation: []protocol.DiagnosticRelatedInformation{
+				{
+					Location: protocol.Location{
+						URI:   filePathToURI(filePath),
+						Range: toProtocolRange(d.FirstRef.ValueRange),
+					},
+					Message: fmt.Sprintf("first occurrence of %q", d.FirstRef.Value),
+				},
+			},
+		})
+	}
+
 	return diags
 }
 
