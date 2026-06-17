@@ -2763,6 +2763,10 @@ slices:
 	if !strings.Contains(newText, "essential:") || !strings.Contains(newText, "openssl_copyright") {
 		t.Errorf("expected edit to contain 'essential:' and 'openssl_copyright', got: %q", newText)
 	}
+	// A blank line must precede the new essential: block.
+	if !strings.HasPrefix(newText, "\n") {
+		t.Errorf("expected edit to start with blank line, got: %q", newText)
+	}
 	// The edit must be inserted right after line 0 (the package: line).
 	if edits[0].Range.Start.Line != 1 {
 		t.Errorf("expected insert after package: line (line 1), got line %d", edits[0].Range.Start.Line)

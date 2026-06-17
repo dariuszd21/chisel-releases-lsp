@@ -270,7 +270,7 @@ func insertTopLevelCopyrightEdit(lines []string, pkg string) (protocol.TextEdit,
 			insertPos := protocol.Position{Line: uint32(i + 1), Character: 0}
 			return protocol.TextEdit{
 				Range:   protocol.Range{Start: insertPos, End: insertPos},
-				NewText: "essential:\n" + itemText,
+				NewText: "\nessential:\n" + itemText,
 			}, true
 		}
 	}
