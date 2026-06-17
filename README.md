@@ -63,9 +63,25 @@ vim.lsp.config('chisel_releases_lsp', {
 vim.lsp.enable('chisel_releases_lsp')
 ```
 
+To override settings, pass them in the same `vim.lsp.config` call:
+
+```lua
+vim.lsp.config('chisel_releases_lsp', {
+  settings = { minPrefixLength = 3 },
+})
+```
+
 ### VS Code
 
 Install the [crl-vscode](https://github.com/dariuszd21/crl-vscode) extension, which provides out-of-the-box integration with `chisel-releases-lsp` for YAML files in chisel release directories.
+
+To override settings, add to `settings.json`:
+
+```json
+{
+  "chiselReleasesLsp.minPrefixLength": 3
+}
+```
 
 ### Helix
 
@@ -205,23 +221,6 @@ Settings can be provided either at the top level or nested under a
 
 // Namespaced:
 { "chiselReleasesLsp": { "minPrefixLength": 3 } }
-```
-
-#### Neovim 0.11+
-
-```lua
-vim.lsp.config('chisel_releases_lsp', {
-  settings = { minPrefixLength = 3 },
-})
-vim.lsp.enable('chisel_releases_lsp')
-```
-
-#### VS Code (settings.json)
-
-```json
-{
-  "chiselReleasesLsp.minPrefixLength": 3
-}
 ```
 
 ---
