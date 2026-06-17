@@ -52,24 +52,15 @@ The server communicates over **stdio** and is started automatically by your edit
 2. Associate it with YAML files inside a `slices/` directory (or all `*.yaml` files in chisel-releases workspaces).
 3. Set the workspace root to the chisel release directory (the one containing `chisel.yaml` and `slices/`).
 
-### Neovim (with `nvim-lspconfig`)
+### Neovim 0.11+
 
 ```lua
-local lspconfig = require('lspconfig')
-local configs = require('lspconfig.configs')
-
-if not configs.chisel_releases_lsp then
-  configs.chisel_releases_lsp = {
-    default_config = {
-      cmd = { 'chisel-releases-lsp' },
-      filetypes = { 'yaml' },
-      root_dir = lspconfig.util.root_pattern('chisel.yaml'),
-      settings = {},
-    },
-  }
-end
-
-lspconfig.chisel_releases_lsp.setup {}
+vim.lsp.config('chisel_releases_lsp', {
+  cmd = { 'chisel-releases-lsp' },
+  filetypes = { 'yaml' },
+  root_markers = { 'chisel.yaml' },
+})
+vim.lsp.enable('chisel_releases_lsp')
 ```
 
 ### VS Code
@@ -216,14 +207,13 @@ Settings can be provided either at the top level or nested under a
 { "chiselReleasesLsp": { "minPrefixLength": 3 } }
 ```
 
-#### Neovim (lspconfig)
+#### Neovim 0.11+
 
 ```lua
-require('lspconfig').chisel_releases_lsp.setup({
-  init_options = {
-    minPrefixLength = 3,  -- require 3 chars before showing completions
-  },
+vim.lsp.config('chisel_releases_lsp', {
+  settings = { minPrefixLength = 3 },
 })
+vim.lsp.enable('chisel_releases_lsp')
 ```
 
 #### VS Code (settings.json)
