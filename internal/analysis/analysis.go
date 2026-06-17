@@ -291,8 +291,16 @@ func DetectDuplicateSlices(idx *index.Index) []DuplicateSlice {
 	return dups
 }
 
-// DuplicateEssential describes a repeated pkg_slice reference within a single
-// essential: block (package-level or per-slice).
+// DuplicateEssential describes a repeated pkg_slice reference. This covers two
+// cases:
+//   - Within a single block: the same value appears more than once in the same
+//     package-level or per-slice essential: list.
+//   - Cross-block redundancy: a slice-level essential repeats a value already
+//     present in the package-level essential (which all slices inherit).
+//
+// SliceName is empty when the duplicate is in the package-level block.
+// When SliceName is non-empty and FirstRef.ValueRange is the zero value,
+// the first occurrence is in the package-level block.
 type DuplicateEssential struct {
 	File      string
 	SliceName string // empty for package-level essential
@@ -300,15 +308,48 @@ type DuplicateEssential struct {
 	DupRef    parser.EssentialRef
 }
 
-// CheckDuplicateEssentials returns a Warning diagnostic for every essential
-// reference that appears more than once in the same essential: block. Package-level
-// and per-slice blocks are checked independently.
+// CheckDuplicateEssentials returns a Warning for every essential reference that
+// is redundant:
+//   - Appearing more than once in the same essential: block (package-level or
+//     per-slice).
+//   - Appearing in a slice-level essential: block when the same value is already
+//     present in the package-level essential: (all slices inherit it).
 func CheckDuplicateEssentials(filePath string, sf *parser.SliceFile) []DuplicateEssential {
 	var result []DuplicateEssential
 
-	check := func(sliceName string, refs []parser.EssentialRef) {
+	// Build a map of package-level refs for fast lookup.
+	pkgLevel := make(map[string]parser.EssentialRef, len(sf.Essential))
+
+	// Check within-block duplicates for the package-level list.
+	seenPkg := make(map[string]parser.EssentialRef)
+	for _, ref := range sf.Essential {
+		if first, exists := seenPkg[ref.Value]; exists {
+			result = append(result, DuplicateEssential{
+				File:     filePath,
+				FirstRef: first,
+				DupRef:   ref,
+			})
+		} else {
+			seenPkg[ref.Value] = ref
+			pkgLevel[ref.Value] = ref
+		}
+	}
+
+	// Check each slice's essential block.
+	for _, sliceName := range sf.SliceOrder {
 		seen := make(map[string]parser.EssentialRef)
-		for _, ref := range refs {
+		for _, ref := range sf.Slices[sliceName].Essential {
+			// Cross-block: already covered by package-level essential.
+			if firstPkg, coveredByPkg := pkgLevel[ref.Value]; coveredByPkg {
+				result = append(result, DuplicateEssential{
+					File:      filePath,
+					SliceName: sliceName,
+					FirstRef:  firstPkg,
+					DupRef:    ref,
+				})
+				continue
+			}
+			// Within-block: already seen in this slice's list.
 			if first, exists := seen[ref.Value]; exists {
 				result = append(result, DuplicateEssential{
 					File:      filePath,
@@ -320,11 +361,6 @@ func CheckDuplicateEssentials(filePath string, sf *parser.SliceFile) []Duplicate
 				seen[ref.Value] = ref
 			}
 		}
-	}
-
-	check("", sf.Essential)
-	for _, sliceName := range sf.SliceOrder {
-		check(sliceName, sf.Slices[sliceName].Essential)
 	}
 	return result
 }

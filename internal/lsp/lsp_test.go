@@ -808,8 +808,6 @@ slices:
     contents:
       /usr/share/doc/libc6/copyright:
   libs:
-    essential:
-      - libc6_copyright
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
@@ -1576,8 +1574,6 @@ slices:
     contents:
       /usr/share/doc/libc6/copyright:
   libs:
-    essential:
-      - libc6_copyright
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `,
@@ -1593,8 +1589,6 @@ slices:
     contents:
       /usr/share/doc/libc6/copyright:
   libs:
-    essential:
-      - libc6_copyright
     contents:
       /lib/x86_64-linux-gnu/libc.so.6:
 `)

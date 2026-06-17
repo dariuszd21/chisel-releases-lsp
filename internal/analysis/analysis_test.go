@@ -552,8 +552,8 @@ slices:
 	}
 }
 
-func TestCheckDuplicateEssentials_CrossBlockIndependent(t *testing.T) {
-	// Same ref in package-level AND slice-level is NOT a duplicate (separate blocks).
+func TestCheckDuplicateEssentials_CrossBlockRedundant(t *testing.T) {
+	// Same ref in package-level AND slice-level is redundant — the slice inherits it.
 	sf, err := parser.ParseBytes([]byte(`package: openssl
 essential:
   - libc6_libs
@@ -568,8 +568,18 @@ slices:
 		t.Fatal(err)
 	}
 	dups := analysis.CheckDuplicateEssentials("openssl.yaml", sf)
-	if len(dups) != 0 {
-		t.Errorf("cross-block duplicates should not be flagged, got %d: %v", len(dups), dups)
+	if len(dups) != 1 {
+		t.Fatalf("expected 1 cross-block duplicate, got %d: %v", len(dups), dups)
+	}
+	if dups[0].SliceName != "libs" {
+		t.Errorf("expected SliceName libs, got %q", dups[0].SliceName)
+	}
+	if dups[0].DupRef.Value != "libc6_libs" {
+		t.Errorf("expected DupRef libc6_libs, got %q", dups[0].DupRef.Value)
+	}
+	// FirstRef should point to the package-level occurrence.
+	if dups[0].FirstRef.Value != "libc6_libs" {
+		t.Errorf("expected FirstRef libc6_libs, got %q", dups[0].FirstRef.Value)
 	}
 }
 
