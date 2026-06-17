@@ -74,7 +74,7 @@ lspconfig.chisel_releases_lsp.setup {}
 
 ### VS Code
 
-Install a generic LSP client extension (e.g. [vscode-glspc](https://github.com/tliron/vscode-glspc)) and configure it to run `chisel-releases-lsp` for YAML files rooted at a chisel release directory.
+Install the [crl-vscode](https://github.com/dariuszd21/crl-vscode) extension, which provides out-of-the-box integration with `chisel-releases-lsp` for YAML files in chisel release directories.
 
 ---
 
