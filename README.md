@@ -76,6 +76,27 @@ lspconfig.chisel_releases_lsp.setup {}
 
 Install the [crl-vscode](https://github.com/dariuszd21/crl-vscode) extension, which provides out-of-the-box integration with `chisel-releases-lsp` for YAML files in chisel release directories.
 
+### Helix
+
+Add the following to `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.chisel-releases-lsp]
+command = "chisel-releases-lsp"
+
+# Optional: override default settings
+config = { minPrefixLength = 3 }
+
+[[language]]
+name = "yaml"
+language-servers = [
+  "yaml-language-server",
+  "chisel-releases-lsp"
+]
+
+roots = ["chisel.yaml"]
+```
+
 ---
 
 ## How it works
