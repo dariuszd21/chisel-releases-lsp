@@ -2715,8 +2715,7 @@ slices:
 }
 
 // TestCodeAction_MissingCopyright_NoEssentialBlock verifies that the code action
-// for a missing-copyright-essential diagnostic inserts a new essential: block
-// when none exists.
+// creates a top-level essential: block (after the package: line) when none exists.
 func TestCodeAction_MissingCopyright_NoEssentialBlock(t *testing.T) {
 	content := `package: openssl
 slices:
@@ -2765,21 +2764,30 @@ slices:
 	if len(edits) == 0 {
 		t.Fatal("expected at least one text edit")
 	}
-	combined := edits[0].NewText
-	if !strings.Contains(combined, "essential:") || !strings.Contains(combined, "openssl_copyright") {
-		t.Errorf("expected edit to contain 'essential:' and 'openssl_copyright', got: %q", combined)
+	newText := edits[0].NewText
+	// Should create a top-level essential: block with the copyright item.
+	if !strings.Contains(newText, "essential:") || !strings.Contains(newText, "openssl_copyright") {
+		t.Errorf("expected edit to contain 'essential:' and 'openssl_copyright', got: %q", newText)
+	}
+	// The edit must be inserted right after line 0 (the package: line).
+	if edits[0].Range.Start.Line != 1 {
+		t.Errorf("expected insert after package: line (line 1), got line %d", edits[0].Range.Start.Line)
+	}
+	// Title should mention "package essentials".
+	if !strings.Contains(fixAction.Title, "package essentials") {
+		t.Errorf("expected title to mention 'package essentials', got: %q", fixAction.Title)
 	}
 }
 
-// TestCodeAction_MissingCopyright_ExistingEssentialBlock verifies that the code
-// action inserts "- openssl_copyright" into an existing essential: block (not
-// creating a duplicate block).
-func TestCodeAction_MissingCopyright_ExistingEssentialBlock(t *testing.T) {
+// TestCodeAction_MissingCopyright_ExistingTopLevelBlock verifies that the code
+// action inserts "- openssl_copyright" into an existing top-level essential:
+// block (not creating a duplicate block or touching per-slice blocks).
+func TestCodeAction_MissingCopyright_ExistingTopLevelBlock(t *testing.T) {
 	content := `package: openssl
+essential:
+  - libc6_libs
 slices:
   libs:
-    essential:
-      - libc6_libs
     contents:
       /usr/lib/libssl.so:
 `
@@ -2820,11 +2828,76 @@ slices:
 		t.Fatal("expected at least one text edit")
 	}
 	newText := edits[0].NewText
-	// Should only insert the item, not create a new essential: block.
+	// Should only insert the item — no new essential: keyword.
 	if strings.Contains(newText, "essential:") {
 		t.Errorf("expected insert-only edit (no new 'essential:' keyword), got: %q", newText)
 	}
 	if !strings.Contains(newText, "openssl_copyright") {
 		t.Errorf("expected edit to contain 'openssl_copyright', got: %q", newText)
+	}
+	// Must use v1 format (- item) since existing items use "- ".
+	if !strings.Contains(newText, "- openssl_copyright") {
+		t.Errorf("expected v1 format '- openssl_copyright', got: %q", newText)
+	}
+	// Insertion is after the "essential:" line (line 1 → insert at line 2).
+	if edits[0].Range.Start.Line != 2 {
+		t.Errorf("expected insert at line 2 (after essential:), got line %d", edits[0].Range.Start.Line)
+	}
+}
+
+// TestCodeAction_MissingCopyright_V3Format verifies that when the file uses v3
+// mapping-style essentials, the fix inserts "openssl_copyright:" (not "- openssl_copyright").
+func TestCodeAction_MissingCopyright_V3Format(t *testing.T) {
+	content := `package: openssl
+essential:
+  libc6_libs:
+slices:
+  libs:
+    contents:
+      /usr/lib/libssl.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"openssl.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "openssl.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+
+	var copyrightDiag *protocol.Diagnostic
+	for i := range diags {
+		if diags[i].Code != nil {
+			if code, ok := diags[i].Code.Value.(string); ok && code == "missing-copyright-essential" {
+				copyrightDiag = &diags[i]
+				break
+			}
+		}
+	}
+	if copyrightDiag == nil {
+		t.Fatal("expected missing-copyright-essential diagnostic, got none")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{*copyrightDiag})
+	var fixAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Edit != nil {
+			fixAction = &actions[i]
+			break
+		}
+	}
+	if fixAction == nil {
+		t.Fatal("expected a code action with workspace edit")
+	}
+	uri := lsp.ExportFilePathToURI(filePath)
+	edits := fixAction.Edit.Changes[uri]
+	if len(edits) == 0 {
+		t.Fatal("expected at least one text edit")
+	}
+	newText := edits[0].NewText
+	// Should use v3 mapping format: "  openssl_copyright:\n"
+	if strings.Contains(newText, "- openssl_copyright") {
+		t.Errorf("expected v3 format (no dash), got v1: %q", newText)
+	}
+	if !strings.Contains(newText, "openssl_copyright:") {
+		t.Errorf("expected v3 format 'openssl_copyright:', got: %q", newText)
 	}
 }

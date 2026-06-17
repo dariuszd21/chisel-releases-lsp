@@ -94,7 +94,7 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
   - `package:` value that does not match the file's name stem (e.g. `openssl.yaml` must declare `package: openssl`).
   - Duplicate slice definitions — the same `pkg_slice` key declared in more than one file.
   - Missing copyright essential — a slice that doesn't reference `<pkg>_copyright` in its effective essentials (package-level or slice-level); the `copyright` slice itself is exempt.
-- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, and a *Go to conflicting slice* action for path collisions.
+- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, a *Go to conflicting slice* action for path collisions, and *Add `<pkg>_copyright` to package essentials* for the missing-copyright diagnostic (inserts into the top-level `essential:` block, covering all slices at once; format matches the file's existing v1/v2 or v3 style).
 - **Hover** renders a markdown summary of a slice's contents and its own essential dependencies.
 - **v3 format** (`essential:` as a YAML mapping with optional per-entry arch filters) is fully supported alongside the classic v1/v2 sequence format.
 

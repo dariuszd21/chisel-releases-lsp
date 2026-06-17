@@ -151,12 +151,12 @@ func (s *Server) computeCodeActions(
 			}
 			pkg := sf.Package
 			copyrightRef := pkg + "_copyright"
-			edit, ok := insertCopyrightEdit(lines, int(diag.Range.Start.Line), pkg)
+			edit, ok := insertTopLevelCopyrightEdit(lines, pkg)
 			if !ok {
 				continue
 			}
 			actions = append(actions, protocol.CodeAction{
-				Title:       fmt.Sprintf("Add %q to slice essentials", copyrightRef),
+				Title:       fmt.Sprintf("Add %q to package essentials (covers all slices)", copyrightRef),
 				Kind:        &quickFix,
 				Diagnostics: []protocol.Diagnostic{diag},
 				IsPreferred: &trueVal,
@@ -171,48 +171,73 @@ func (s *Server) computeCodeActions(
 	return actions
 }
 
-// insertCopyrightEdit computes a TextEdit that inserts "- <pkg>_copyright" into
-// the slice at diagLine. If the slice already has an essential: block, the new
-// entry is added as the first item. If not, a new essential: block is inserted
-// right after the slice name line. Returns (edit, true) on success.
-func insertCopyrightEdit(lines []string, diagLine int, pkg string) (protocol.TextEdit, bool) {
-	if diagLine < 0 || diagLine >= len(lines) {
-		return protocol.TextEdit{}, false
-	}
-	sliceLine := lines[diagLine]
-	sliceIndent := len(sliceLine) - len(strings.TrimLeft(sliceLine, " \t"))
-	childIndent := strings.Repeat(" ", sliceIndent+2)
-	itemIndent := strings.Repeat(" ", sliceIndent+4)
-	copyrightRef := pkg + "_copyright"
-
-	// Scan forward to find an existing essential: block or the end of this slice.
-	for i := diagLine + 1; i < len(lines); i++ {
-		line := lines[i]
+// detectEssentialFormat scans lines for an essential: block and returns "v3"
+// if items are mapping keys (no leading "- "), or "v1" for sequence format.
+// Defaults to "v1" when no existing items are found.
+func detectEssentialFormat(lines []string) string {
+	inEssential := false
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		if trimmed == "essential:" {
+			inEssential = true
 			continue
 		}
-		indent := len(line) - len(strings.TrimLeft(line, " \t"))
-		if indent <= sliceIndent {
-			// Hit sibling or parent — no essential: block found.
-			break
+		if inEssential {
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			indent := len(line) - len(strings.TrimLeft(line, " \t"))
+			if indent == 0 {
+				break // left the block
+			}
+			if strings.HasPrefix(trimmed, "- ") {
+				return "v1"
+			}
+			// Non-empty, indented, not a list item → v3 mapping key
+			return "v3"
 		}
-		if trimmed == "essential:" {
-			// Insert as the first item of the existing essential: block.
+	}
+	return "v1"
+}
+
+// insertTopLevelCopyrightEdit computes a TextEdit that inserts <pkg>_copyright
+// into the package-level essential: block. If no such block exists, it creates
+// one after the "package:" line. The insertion format (v1 or v3) is detected
+// from the existing file content.
+func insertTopLevelCopyrightEdit(lines []string, pkg string) (protocol.TextEdit, bool) {
+	copyrightRef := pkg + "_copyright"
+	format := detectEssentialFormat(lines)
+
+	var itemText string
+	if format == "v3" {
+		itemText = "  " + copyrightRef + ":\n"
+	} else {
+		itemText = "  - " + copyrightRef + "\n"
+	}
+
+	// Look for top-level essential: block (indent 0).
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "essential:" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
 			insertPos := protocol.Position{Line: uint32(i + 1), Character: 0}
 			return protocol.TextEdit{
 				Range:   protocol.Range{Start: insertPos, End: insertPos},
-				NewText: itemIndent + "- " + copyrightRef + "\n",
+				NewText: itemText,
 			}, true
 		}
 	}
 
-	// No essential: block — create one right after the slice name line.
-	insertPos := protocol.Position{Line: uint32(diagLine + 1), Character: 0}
-	return protocol.TextEdit{
-		Range:   protocol.Range{Start: insertPos, End: insertPos},
-		NewText: childIndent + "essential:\n" + itemIndent + "- " + copyrightRef + "\n",
-	}, true
+	// No top-level essential: block — create one after the "package:" line.
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "package:") && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			insertPos := protocol.Position{Line: uint32(i + 1), Character: 0}
+			return protocol.TextEdit{
+				Range:   protocol.Range{Start: insertPos, End: insertPos},
+				NewText: "essential:\n" + itemText,
+			}, true
+		}
+	}
+
+	return protocol.TextEdit{}, false
 }
 
 // isListItemLine reports whether the line at lineNum (0-indexed, within lines)
