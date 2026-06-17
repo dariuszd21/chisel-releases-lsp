@@ -81,6 +81,7 @@ func New() *Server {
 		TextDocumentCodeAction:          s.textDocumentCodeAction,
 		WorkspaceDidChangeConfiguration: s.workspaceDidChangeConfiguration,
 		WorkspaceExecuteCommand:         s.workspaceExecuteCommand,
+		WorkspaceDidChangeWatchedFiles:  s.workspaceDidChangeWatchedFiles,
 	}
 	return s
 }
@@ -303,6 +304,41 @@ func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidClo
 func (s *Server) workspaceDidChangeConfiguration(_ *glsp.Context, params *protocol.DidChangeConfigurationParams) error {
 	if params != nil {
 		s.applySettings(params.Settings)
+	}
+	return nil
+}
+
+// workspaceDidChangeWatchedFiles handles workspace/didChangeWatchedFiles
+// notifications sent by the editor's built-in file watcher. This supplements
+// the server's own fsnotify watcher (e.g. on network filesystems where fsnotify
+// may be unreliable). Operations are idempotent so duplicate events are harmless.
+func (s *Server) workspaceDidChangeWatchedFiles(_ *glsp.Context, params *protocol.DidChangeWatchedFilesParams) error {
+	if s.idx == nil || params == nil {
+		return nil
+	}
+	s.notifyMu.Lock()
+	n := s.notifier
+	s.notifyMu.Unlock()
+	for _, ev := range params.Changes {
+		filePath, err := uriToPath(string(ev.URI))
+		if err != nil {
+			continue
+		}
+		switch ev.Type {
+		case protocol.FileChangeTypeCreated, protocol.FileChangeTypeChanged:
+			_ = s.idx.IndexFile(filePath)
+			if n != nil {
+				s.publishDiagnosticsForFile(n, filePath)
+				s.republishOpenFiles(n, filePath)
+			}
+		case protocol.FileChangeTypeDeleted:
+			s.idx.DeleteFile(filePath)
+			if n != nil {
+				// Clear diagnostics for the deleted file and update peers.
+				publishDiagnostics(n, filePathToURI(filePath), []protocol.Diagnostic{})
+				s.republishOpenFiles(n, filePath)
+			}
+		}
 	}
 	return nil
 }

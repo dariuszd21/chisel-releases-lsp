@@ -184,6 +184,14 @@ func (idx *Index) IndexFile(absPath string) error {
 	return nil
 }
 
+// DeleteFile removes all index entries for absPath. It is a no-op when the
+// file is not currently indexed.
+func (idx *Index) DeleteFile(absPath string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	idx.removeFile(absPath)
+}
+
 // applySliceFile replaces the index entries for absPath with sf. Caller must hold mu.
 func (idx *Index) applySliceFile(absPath string, sf *parser.SliceFile) {
 	idx.removeFile(absPath)
