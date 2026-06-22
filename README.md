@@ -240,6 +240,5 @@ Settings can be provided either at the top level or nested under a
 - [x] Collision `relatedInformation` + `gotoConflict` code action
 - [x] Missing copyright essential diagnostic + quick fix
 - [x] Duplicate essential reference diagnostic + goto/remove actions
-- [ ] Remote chisel-releases (pull from `canonical/chisel-releases` GitHub branches)
-- [ ] TCP/socket transport in addition to stdio
-- [ ] Schema validation for `chisel.yaml`
+- [ ] Content path validation — validate using chisel's own rules (`?`, `*`, `**`; no character classes `[...]`)
+- [ ] Lexical sort check — warn when `contents:` paths or `essential:` entries are not in lexical order, with a quick fix to sort them
