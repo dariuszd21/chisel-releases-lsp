@@ -242,3 +242,4 @@ Settings can be provided either at the top level or nested under a
 - [x] Duplicate essential reference diagnostic + goto/remove actions
 - [ ] Content path validation — validate using chisel's own rules (`?`, `*`, `**`; no character classes `[...]`)
 - [ ] Lexical sort check — warn when `contents:` paths or `essential:` entries are not in lexical order, with a quick fix to sort them
+- [ ] `prefer`-aware collision detection — suppress collision warnings when an entry carries `prefer: <package>` pointing at the conflicting package; validate that `prefer` values are not used on globs, reference a different package, and name a package that exists in the release
