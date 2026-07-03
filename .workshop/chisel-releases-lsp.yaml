@@ -1,0 +1,11 @@
+name: chisel-releases-lsp
+base: ubuntu@24.04
+sdks:
+  - name: go
+    channel: 1.26/stable
+  - name: pi-coding-agent
+    channel: latest/edge
+  - name: copilot
+    channel: latest/stable
+  - name: vscode-remote
+    channel: latest/stable
