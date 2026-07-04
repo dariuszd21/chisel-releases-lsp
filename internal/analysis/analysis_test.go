@@ -55,14 +55,35 @@ slices:
 			msgFrag: "absolute",
 		},
 		{
+			// [ is a literal character in chisel paths, not a glob metachar.
+			// /usr/bin/[ is a real path (the GNU [ command).
+			yaml: `package: p
+slices:
+  s:
+    contents:
+      /usr/bin/[:
+`,
+			wantErr: false,
+		},
+		{
+			// Bracket characters anywhere in a path are always literal.
 			yaml: `package: p
 slices:
   s:
     contents:
       /usr/bin/foo[bar:
 `,
-			wantErr: true,
-			msgFrag: "invalid glob",
+			wantErr: false,
+		},
+		{
+			// Closed bracket is also literal.
+			yaml: `package: p
+slices:
+  s:
+    contents:
+      /usr/bin/foo[bar]:
+`,
+			wantErr: false,
 		},
 	}
 
@@ -93,6 +114,8 @@ slices:
 }
 
 func TestValidateGlobs_StarStarMidSegment(t *testing.T) {
+	// Per chisel spec, ** matches zero or more characters including /.
+	// There is no requirement for ** to be a standalone path segment.
 	yaml := `package: p
 slices:
   s:
@@ -104,8 +127,8 @@ slices:
 		t.Fatalf("parse: %v", err)
 	}
 	diags := analysis.ValidateGlobs("test.yaml", sf)
-	if len(diags) == 0 {
-		t.Error("expected diagnostic for mid-segment **, got none")
+	if len(diags) != 0 {
+		t.Errorf("/foo**/bar is a valid chisel path, got unexpected diagnostics: %v", diags)
 	}
 }
 
@@ -128,7 +151,8 @@ slices:
 }
 
 func TestValidateGlobs_StarStarWithSuffix(t *testing.T) {
-	// **.so in a segment is invalid — ** is mixed with other characters.
+	// Per chisel spec, ** matches zero or more characters including /.
+	// /usr/lib/**.so is valid: it matches .so files at any depth under /usr/lib/.
 	yaml := `package: p
 slices:
   s:
@@ -140,8 +164,8 @@ slices:
 		t.Fatalf("parse: %v", err)
 	}
 	diags := analysis.ValidateGlobs("test.yaml", sf)
-	if len(diags) == 0 {
-		t.Error("expected diagnostic for **.so segment, got none")
+	if len(diags) != 0 {
+		t.Errorf("/usr/lib/**.so is a valid chisel path, got unexpected diagnostics: %v", diags)
 	}
 }
 

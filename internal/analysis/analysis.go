@@ -1,12 +1,11 @@
 // Package analysis provides static analysis passes over chisel slice definitions:
-//   - Glob pattern validation for contents: paths
+//   - Content path validation for contents: paths
 //   - Slice collision detection (same concrete path in different packages)
 //   - Package name ↔ filename consistency
 package analysis
 
 import (
 	"fmt"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,13 +32,15 @@ type Diagnostic struct {
 }
 
 // ValidateGlobs inspects every contents: path in sf and returns diagnostics for
-// any path that is not a valid glob pattern.
+// any path that does not comply with chisel's path rules:
+//   - must be absolute (start with /)
+//   - wildcards ?, * and ** are allowed; all other characters are literal
 func ValidateGlobs(filePath string, sf *parser.SliceFile) []Diagnostic {
 	var diags []Diagnostic
 	for _, name := range sf.SliceOrder {
 		sd := sf.Slices[name]
 		for _, ce := range sd.Contents {
-			if msg := validateGlobPath(ce.Path); msg != "" {
+			if msg := validateContentPath(ce.Path); msg != "" {
 				diags = append(diags, Diagnostic{
 					File:     filePath,
 					Range:    ce.PathRange,
@@ -74,27 +75,18 @@ func CheckPackageName(filePath string, sf *parser.SliceFile) *Diagnostic {
 	}
 }
 
-// Chisel uses Go's path.Match-style globs but also allows **, so we normalise
-// ** → "*" for the stdlib check.
-func validateGlobPath(p string) string {
+// validateContentPath checks that p complies with chisel's content path rules:
+//   - must not be empty
+//   - must be absolute (start with /)
+//
+// Wildcard characters (?, * and **) are allowed anywhere in the path.
+// All other characters, including [ and ], are treated as literals.
+func validateContentPath(p string) string {
 	if p == "" {
 		return "content path must not be empty"
 	}
 	if !strings.HasPrefix(p, "/") {
 		return "content path must be absolute (start with /)"
-	}
-	// Replace ** with a single segment placeholder for validation purposes.
-	normalised := strings.ReplaceAll(p, "**", "STARSTAR")
-	_, err := path.Match(normalised, normalised)
-	if err != nil {
-		return "invalid glob pattern: " + err.Error()
-	}
-	// Validate that ** only appears as a complete path segment (e.g. /dir/**/file is fine,
-	// but /dir/foo** or /dir/**.so are not).
-	for _, seg := range strings.Split(p, "/") {
-		if strings.Contains(seg, "**") && seg != "**" {
-			return "** must appear as a standalone path segment (e.g. /dir/**foo is not valid)"
-		}
 	}
 	return ""
 }
@@ -187,9 +179,10 @@ func DetectCollisions(idx *index.Index) []Collision {
 	return collisions
 }
 
-// isGlob reports whether a path contains glob metacharacters.
+// isGlob reports whether a path contains chisel glob metacharacters (*, ?).
+// [ and ] are not metacharacters in chisel and are treated as literals.
 func isGlob(p string) bool {
-	return strings.ContainsAny(p, "*?[")
+	return strings.ContainsAny(p, "*?")
 }
 
 // CheckCopyrightEssential returns a Warning diagnostic for every slice that does
