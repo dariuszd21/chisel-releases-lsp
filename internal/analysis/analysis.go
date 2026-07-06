@@ -6,6 +6,7 @@ package analysis
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -211,6 +212,213 @@ func preferReaches(preferGraph map[string]string, from, to string) bool {
 		curr = preferGraph[curr]
 	}
 	return false
+}
+
+// GlobCollision describes a potential cross-package path conflict where a glob
+// pattern in one package matches a concrete path declared in a different package.
+type GlobCollision struct {
+	GlobPath   string // the glob pattern
+	GlobSlice  string // pkg_slice
+	GlobFile   string
+	GlobRange  parser.Range
+	ExactPath  string // the concrete path the glob matches
+	ExactSlice string // pkg_slice
+	ExactFile  string
+	ExactRange parser.Range
+}
+
+// DetectGlobCollisions finds every glob pattern that matches a concrete path
+// declared in a different package. The static prefix of each glob is used to
+// quickly skip candidates that cannot possibly match, keeping the check fast.
+// Prefer-chain suppression follows the same rules as DetectCollisions.
+func DetectGlobCollisions(idx *index.Index) []GlobCollision {
+	type entry struct {
+		pkg       string
+		sliceName string
+		file      string
+		r         parser.Range
+		prefer    string
+		pth       string
+	}
+
+	var globs, exacts []entry
+	for _, filePath := range idx.AllFiles() {
+		sf := idx.FileSliceFile(filePath)
+		if sf == nil || sf.Package == "" {
+			continue
+		}
+		for sliceName, sd := range sf.Slices {
+			for _, ce := range sd.Contents {
+				e := entry{
+					pkg:       sf.Package,
+					sliceName: sliceName,
+					file:      filePath,
+					r:         ce.PathRange,
+					prefer:    ce.Prefer,
+					pth:       ce.Path,
+				}
+				if isGlob(ce.Path) {
+					globs = append(globs, e)
+				} else {
+					exacts = append(exacts, e)
+				}
+			}
+		}
+	}
+
+	// Sort for deterministic output.
+	sort.Slice(globs, func(i, j int) bool {
+		if globs[i].file != globs[j].file {
+			return globs[i].file < globs[j].file
+		}
+		return globs[i].pth < globs[j].pth
+	})
+	sort.Slice(exacts, func(i, j int) bool { return exacts[i].pth < exacts[j].pth })
+
+	seen := make(map[string]bool)
+	var collisions []GlobCollision
+	for _, g := range globs {
+		pfx := globStaticPrefix(g.pth)
+		for _, e := range exacts {
+			if e.pkg == g.pkg {
+				continue // same package — intra-package is handled by CheckRedundantPaths
+			}
+			// Static prefix optimisation: skip paths that cannot possibly match.
+			if pfx != "" && !strings.HasPrefix(e.pth, pfx) {
+				continue
+			}
+			if !globMatchesPath(g.pth, e.pth) {
+				continue
+			}
+			// Prefer suppression.
+			preferGraph := make(map[string]string)
+			if g.prefer != "" {
+				preferGraph[g.pkg] = g.prefer
+			}
+			if e.prefer != "" {
+				preferGraph[e.pkg] = e.prefer
+			}
+			if preferReaches(preferGraph, g.pkg, e.pkg) || preferReaches(preferGraph, e.pkg, g.pkg) {
+				continue
+			}
+			// Deduplicate: one collision per (globPkg, exactPkg, path) regardless of slice.
+			key := g.pkg + "|" + e.pkg + "|" + g.pth + "|" + e.pth
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			collisions = append(collisions, GlobCollision{
+				GlobPath:   g.pth,
+				GlobSlice:  g.pkg + "_" + g.sliceName,
+				GlobFile:   g.file,
+				GlobRange:  g.r,
+				ExactPath:  e.pth,
+				ExactSlice: e.pkg + "_" + e.sliceName,
+				ExactFile:  e.file,
+				ExactRange: e.r,
+			})
+		}
+	}
+	return collisions
+}
+
+// CheckRedundantPaths returns a Warning for every exact content path in a slice
+// that has no attributes and is already matched by a glob pattern in the same slice.
+func CheckRedundantPaths(filePath string, sf *parser.SliceFile) []Diagnostic {
+	var diags []Diagnostic
+	for _, name := range sf.SliceOrder {
+		sd := sf.Slices[name]
+		var globs []parser.ContentEntry
+		for _, ce := range sd.Contents {
+			if isGlob(ce.Path) {
+				globs = append(globs, ce)
+			}
+		}
+		if len(globs) == 0 {
+			continue
+		}
+		for _, ce := range sd.Contents {
+			if isGlob(ce.Path) || ce.HasAttributes {
+				continue
+			}
+			for _, g := range globs {
+				if globMatchesPath(g.Path, ce.Path) {
+					diags = append(diags, Diagnostic{
+						File:  filePath,
+						Range: ce.PathRange,
+						Message: fmt.Sprintf(
+							"path %q is redundant: already covered by pattern %q in this slice",
+							ce.Path, g.Path,
+						),
+						Severity: SeverityWarning,
+					})
+					break // report once per redundant path
+				}
+			}
+		}
+	}
+	return diags
+}
+
+// GlobMatchesPath is the exported entry point for globMatchesPath, used in tests.
+func GlobMatchesPath(glob, p string) bool { return globMatchesPath(glob, p) }
+
+// globMatchesPath reports whether chisel glob pattern g matches exact path p.
+// Chisel wildcard semantics:
+//   - ? matches any single character except /
+//   - * matches zero or more characters except /
+//   - ** matches zero or more characters including /
+func globMatchesPath(g, p string) bool {
+	if !strings.Contains(g, "**") {
+		ok, _ := path.Match(g, p)
+		return ok
+	}
+	// Split on the leftmost ** and try every possible split of p so that:
+	// the part before ** is matched by the prefix pattern,
+	// ** matches p[k:j] (any substring including "/"),
+	// and the suffix pattern (which may contain more **) matches p[j:].
+	i := strings.Index(g, "**")
+	prefix, suffix := g[:i], g[i+2:]
+	for k := 0; k <= len(p); k++ {
+		if prefix != "" {
+			ok, err := path.Match(prefix, p[:k])
+			if err != nil || !ok {
+				continue
+			}
+		} else if k > 0 {
+			// Empty prefix matches only at position 0.
+			break
+		}
+		for j := k; j <= len(p); j++ {
+			if globMatchesPath(suffix, p[j:]) {
+				return true
+			}
+			// When ** matches zero characters and sits between two slashes
+			// (…/prefix/ ** /suffix…), the two adjacent slashes collapse into one.
+			// Try dropping the leading slash of suffix so "/README" matches "README".
+			if j == k && len(suffix) > 0 && suffix[0] == '/' && k > 0 && p[k-1] == '/' {
+				if globMatchesPath(suffix[1:], p[j:]) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// globStaticPrefix returns the directory prefix of a glob before its first
+// wildcard character. Used to quickly discard exact paths that cannot match.
+func globStaticPrefix(glob string) string {
+	for i, c := range glob {
+		if c == '*' || c == '?' {
+			lastSlash := strings.LastIndex(glob[:i], "/")
+			if lastSlash < 0 {
+				return ""
+			}
+			return glob[:lastSlash+1]
+		}
+	}
+	return glob // no wildcards
 }
 
 // ValidatePrefer checks every content entry that carries a prefer: attribute

@@ -25,10 +25,11 @@ type Range struct {
 
 // ContentEntry represents one path key under a slice's `contents:` block.
 type ContentEntry struct {
-	Path        string
-	PathRange   Range
-	Prefer      string // value of the prefer: attribute; empty if absent
-	PreferRange Range  // range of the prefer value, for diagnostics
+	Path          string
+	PathRange     Range
+	Prefer        string // value of the prefer: attribute; empty if absent
+	PreferRange   Range  // range of the prefer value, for diagnostics
+	HasAttributes bool   // true when the entry has any YAML value attributes (mode, text, copy, …)
 }
 
 // SliceDef represents a single named slice inside a package.
@@ -214,6 +215,7 @@ func parseContents(node *yaml.Node) ([]ContentEntry, error) {
 		}
 		// Parse optional attributes from the value node (inline or block mapping).
 		if val.Kind == yaml.MappingNode {
+			ce.HasAttributes = len(val.Content) > 0
 			for j := 0; j+1 < len(val.Content); j += 2 {
 				attrKey := val.Content[j]
 				attrVal := val.Content[j+1]

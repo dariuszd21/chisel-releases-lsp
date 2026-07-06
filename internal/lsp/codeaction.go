@@ -206,6 +206,58 @@ func (s *Server) computeCodeActions(
 					},
 				},
 			})
+		case DiagCodeGlobCollision:
+			if s.idx == nil {
+				continue
+			}
+			lineNum := diag.Range.Start.Line
+			for _, col := range analysis.DetectGlobCollisions(s.idx) {
+				var otherURI string
+				var otherLine, otherChar uint32
+				if col.GlobFile == filePath && col.GlobRange.Start.Line == int(lineNum) {
+					otherURI = string(filePathToURI(col.ExactFile))
+					otherLine = uint32(col.ExactRange.Start.Line)
+					otherChar = uint32(col.ExactRange.Start.Character)
+				} else if col.ExactFile == filePath && col.ExactRange.Start.Line == int(lineNum) {
+					otherURI = string(filePathToURI(col.GlobFile))
+					otherLine = uint32(col.GlobRange.Start.Line)
+					otherChar = uint32(col.GlobRange.Start.Character)
+				}
+				if otherURI == "" {
+					continue
+				}
+				actionKind := protocol.CodeActionKindEmpty
+				actions = append(actions, protocol.CodeAction{
+					Title:       fmt.Sprintf("Go to conflicting slice in %s", filepath.Base(col.GlobFile)),
+					Kind:        &actionKind,
+					Diagnostics: []protocol.Diagnostic{diag},
+					Command: &protocol.Command{
+						Title:     "Go to conflicting slice",
+						Command:   CmdGotoConflict,
+						Arguments: []any{otherURI, float64(otherLine), float64(otherChar)},
+					},
+				})
+				break
+			}
+
+		case DiagCodeRedundantPath:
+			lineNum := int(diag.Range.Start.Line)
+			if !isYAMLMapKeyLine(lines, lineNum) {
+				continue
+			}
+			editRange := fullLineDeleteRange(lines, lineNum)
+			actions = append(actions, protocol.CodeAction{
+				Title:       "Remove redundant path",
+				Kind:        &quickFix,
+				Diagnostics: []protocol.Diagnostic{diag},
+				IsPreferred: &trueVal,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+						uri: {{Range: editRange, NewText: ""}},
+					},
+				},
+			})
+
 		case DiagCodeOutOfOrder:
 			if s.idx == nil {
 				continue

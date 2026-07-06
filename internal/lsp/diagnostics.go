@@ -195,6 +195,47 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		})
 	}
 
+	// 10. Glob-exact cross-package collision detection.
+	for _, col := range analysis.DetectGlobCollisions(s.idx) {
+		if col.GlobFile == filePath {
+			diags = append(diags, protocol.Diagnostic{
+				Range:    toProtocolRange(col.GlobRange),
+				Severity: severityPtr(protocol.DiagnosticSeverityWarning),
+				Source:   strPtr("chisel-releases-lsp"),
+				Code:     diagCodePtr(DiagCodeGlobCollision),
+				Message:  fmt.Sprintf("glob collision: pattern %q matches path %q also claimed by %s", col.GlobPath, col.ExactPath, col.ExactSlice),
+				RelatedInformation: []protocol.DiagnosticRelatedInformation{{
+					Location: protocol.Location{URI: filePathToURI(col.ExactFile), Range: toProtocolRange(col.ExactRange)},
+					Message:  fmt.Sprintf("%s also claims %q", col.ExactSlice, col.ExactPath),
+				}},
+			})
+		}
+		if col.ExactFile == filePath {
+			diags = append(diags, protocol.Diagnostic{
+				Range:    toProtocolRange(col.ExactRange),
+				Severity: severityPtr(protocol.DiagnosticSeverityWarning),
+				Source:   strPtr("chisel-releases-lsp"),
+				Code:     diagCodePtr(DiagCodeGlobCollision),
+				Message:  fmt.Sprintf("glob collision: path %q is matched by pattern %q from %s", col.ExactPath, col.GlobPath, col.GlobSlice),
+				RelatedInformation: []protocol.DiagnosticRelatedInformation{{
+					Location: protocol.Location{URI: filePathToURI(col.GlobFile), Range: toProtocolRange(col.GlobRange)},
+					Message:  fmt.Sprintf("%s has pattern %q matching this path", col.GlobSlice, col.GlobPath),
+				}},
+			})
+		}
+	}
+
+	// 11. Redundant path check (exact path covered by glob in same slice).
+	for _, d := range analysis.CheckRedundantPaths(filePath, sf) {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.Range),
+			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
+			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeRedundantPath),
+			Message:  d.Message,
+		})
+	}
+
 	return diags
 }
 

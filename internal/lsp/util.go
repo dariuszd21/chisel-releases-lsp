@@ -58,6 +58,8 @@ const (
 	DiagCodeDuplicateEssential  = "duplicate-essential"
 	DiagCodeOutOfOrder          = "out-of-order"
 	DiagCodeInvalidPrefer       = "invalid-prefer"
+	DiagCodeGlobCollision       = "glob-collision"
+	DiagCodeRedundantPath       = "redundant-path"
 )
 
 // CmdGotoConflict is the workspace/executeCommand command name for navigating
