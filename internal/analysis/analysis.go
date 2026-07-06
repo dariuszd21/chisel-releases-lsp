@@ -104,15 +104,15 @@ type Collision struct {
 
 // DetectCollisions finds all concrete (non-glob) paths that are claimed by
 // slices in two or more different packages with incompatible definitions.
-// Compatible = path appears in slices of the same package, or both entries
-// have identical inline attributes (both are plain extractions with no copy/text/etc).
-// For LSP purposes we flag cross-package duplicate concrete paths as collisions.
+// A collision is suppressed when either side carries a prefer: attribute
+// pointing at the other package.
 func DetectCollisions(idx *index.Index) []Collision {
 	type entry struct {
 		pkg       string
 		sliceName string
 		file      string
 		r         parser.Range
+		prefer    string
 	}
 	// path → list of entries
 	pathMap := make(map[string][]entry)
@@ -132,6 +132,7 @@ func DetectCollisions(idx *index.Index) []Collision {
 					sliceName: sliceName,
 					file:      filePath,
 					r:         ce.PathRange,
+					prefer:    ce.Prefer,
 				})
 			}
 		}
@@ -164,6 +165,25 @@ func DetectCollisions(idx *index.Index) []Collision {
 		for i := 0; i < len(reps); i++ {
 			for j := i + 1; j < len(reps); j++ {
 				a, b := reps[i], reps[j]
+				// Suppress when any entry in either package prefers the other.
+				suppressed := false
+				for _, e := range pkgSet[a.pkg] {
+					if e.prefer == b.pkg {
+						suppressed = true
+						break
+					}
+				}
+				if !suppressed {
+					for _, e := range pkgSet[b.pkg] {
+						if e.prefer == a.pkg {
+							suppressed = true
+							break
+						}
+					}
+				}
+				if suppressed {
+					continue
+				}
 				collisions = append(collisions, Collision{
 					Path:   p,
 					SliceA: a.pkg + "_" + a.sliceName,
@@ -177,6 +197,55 @@ func DetectCollisions(idx *index.Index) []Collision {
 		}
 	}
 	return collisions
+}
+
+// ValidatePrefer checks every content entry that carries a prefer: attribute
+// and reports diagnostics for three invalid usages:
+//   - prefer: on a glob path (meaningless — globs are never checked for collisions)
+//   - prefer: naming the same package as the file itself
+//   - prefer: naming a package that does not exist in the release
+func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []Diagnostic {
+	var diags []Diagnostic
+	for _, name := range sf.SliceOrder {
+		for _, ce := range sf.Slices[name].Contents {
+			if ce.Prefer == "" {
+				continue
+			}
+			if isGlob(ce.Path) {
+				diags = append(diags, Diagnostic{
+					File:     filePath,
+					Range:    ce.PreferRange,
+					Message:  "prefer: is not valid on glob patterns",
+					Severity: SeverityError,
+				})
+				continue
+			}
+			if ce.Prefer == sf.Package {
+				diags = append(diags, Diagnostic{
+					File:  filePath,
+					Range: ce.PreferRange,
+					Message: fmt.Sprintf(
+						"prefer: must reference a different package, not %q",
+						ce.Prefer,
+					),
+					Severity: SeverityError,
+				})
+				continue
+			}
+			if !idx.PackageExists(ce.Prefer) {
+				diags = append(diags, Diagnostic{
+					File:  filePath,
+					Range: ce.PreferRange,
+					Message: fmt.Sprintf(
+						"prefer: references unknown package %q",
+						ce.Prefer,
+					),
+					Severity: SeverityWarning,
+				})
+			}
+		}
+	}
+	return diags
 }
 
 // isGlob reports whether a path contains chisel glob metacharacters (*, ?).

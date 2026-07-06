@@ -3451,3 +3451,83 @@ slices:
 		t.Errorf("libc6_libs should sort before zlib1g_libs, got: %q", got)
 	}
 }
+
+func TestComputeDiagnostics_PreferSuppressesCollision(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	for _, d := range srv.ExportComputeDiagnostics(pkgaPath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeSliceCollision {
+			t.Errorf("collision should be suppressed by prefer, got diagnostic: %q", d.Message)
+		}
+	}
+}
+
+func TestComputeDiagnostics_PreferOnGlob(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/a.so:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	found := false
+	for _, d := range srv.ExportComputeDiagnostics(pkgaPath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeInvalidPrefer {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected invalid-prefer diagnostic for prefer on glob")
+	}
+}
+
+func TestComputeDiagnostics_PreferUnknownPackage(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/a.so: {prefer: nonexistent}
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	found := false
+	for _, d := range srv.ExportComputeDiagnostics(pkgaPath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeInvalidPrefer {
+			found = true
+			if !strings.Contains(d.Message, "nonexistent") {
+				t.Errorf("message should name the unknown package, got: %q", d.Message)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected invalid-prefer diagnostic for unknown package")
+	}
+}

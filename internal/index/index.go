@@ -141,6 +141,15 @@ func (idx *Index) FindReferences(pkg, sliceName string) []IndexedRef {
 	return refs
 }
 
+// PackageExists reports whether any slice file in the index declares the given
+// package name.
+func (idx *Index) PackageExists(pkg string) bool {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	_, ok := idx.slices[pkg]
+	return ok
+}
+
 // AllFiles returns all currently indexed file paths in sorted order.
 func (idx *Index) AllFiles() []string {
 	idx.mu.RLock()

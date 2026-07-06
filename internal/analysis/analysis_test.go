@@ -783,3 +783,179 @@ slices:
 		t.Errorf("expected no diagnostics for sorted v3 essential, got: %v", diags)
 	}
 }
+
+// --- DetectCollisions prefer suppression ---
+
+func TestDetectCollisions_PreferSuppresses(t *testing.T) {
+	// One side carries prefer: pointing at the other — no collision expected.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+	})
+	if collisions := analysis.DetectCollisions(idx); len(collisions) != 0 {
+		t.Errorf("expected no collisions when prefer suppresses, got: %+v", collisions)
+	}
+}
+
+func TestDetectCollisions_MutualPrefer(t *testing.T) {
+	// Both sides prefer each other — collision must still be suppressed.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+	})
+	if collisions := analysis.DetectCollisions(idx); len(collisions) != 0 {
+		t.Errorf("expected no collisions with mutual prefer, got: %+v", collisions)
+	}
+}
+
+func TestDetectCollisions_PreferWrongPackage(t *testing.T) {
+	// prefer points at a third package, not the actual conflicting one — collision must fire.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgc}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+	})
+	if collisions := analysis.DetectCollisions(idx); len(collisions) != 1 {
+		t.Errorf("expected 1 collision when prefer targets wrong package, got: %d", len(collisions))
+	}
+}
+
+// --- ValidatePrefer ---
+
+func TestValidatePrefer_OnGlob(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/a.so:
+`,
+	})
+	files := idx.AllFiles()
+	var pkgaFile string
+	for _, f := range files {
+		if idx.FileSliceFile(f).Package == "pkga" {
+			pkgaFile = f
+		}
+	}
+	sf := idx.FileSliceFile(pkgaFile)
+	diags := analysis.ValidatePrefer(pkgaFile, sf, idx)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for prefer on glob, got %d: %v", len(diags), diags)
+	}
+	if diags[0].Severity != analysis.SeverityError {
+		t.Errorf("expected Error severity, got %v", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, "glob") {
+		t.Errorf("message should mention glob, got: %q", diags[0].Message)
+	}
+}
+
+func TestValidatePrefer_SamePackage(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/a.so: {prefer: pkga}
+`,
+	})
+	files := idx.AllFiles()
+	sf := idx.FileSliceFile(files[0])
+	diags := analysis.ValidatePrefer(files[0], sf, idx)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for prefer == own package, got %d: %v", len(diags), diags)
+	}
+	if diags[0].Severity != analysis.SeverityError {
+		t.Errorf("expected Error severity, got %v", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, "pkga") {
+		t.Errorf("message should mention the package name, got: %q", diags[0].Message)
+	}
+}
+
+func TestValidatePrefer_UnknownPackage(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/a.so: {prefer: nonexistent}
+`,
+	})
+	files := idx.AllFiles()
+	sf := idx.FileSliceFile(files[0])
+	diags := analysis.ValidatePrefer(files[0], sf, idx)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for unknown prefer target, got %d: %v", len(diags), diags)
+	}
+	if diags[0].Severity != analysis.SeverityWarning {
+		t.Errorf("expected Warning severity, got %v", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, "nonexistent") {
+		t.Errorf("message should mention the unknown package, got: %q", diags[0].Message)
+	}
+}
+
+func TestValidatePrefer_Valid(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/a.so: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/a.so:
+`,
+	})
+	files := idx.AllFiles()
+	var pkgaFile string
+	for _, f := range files {
+		if idx.FileSliceFile(f).Package == "pkga" {
+			pkgaFile = f
+		}
+	}
+	sf := idx.FileSliceFile(pkgaFile)
+	if diags := analysis.ValidatePrefer(pkgaFile, sf, idx); len(diags) != 0 {
+		t.Errorf("expected no diagnostics for valid prefer, got: %v", diags)
+	}
+}

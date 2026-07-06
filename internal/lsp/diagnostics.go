@@ -184,6 +184,17 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		})
 	}
 
+	// 9. Prefer validation.
+	for _, d := range analysis.ValidatePrefer(filePath, sf, s.idx) {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.Range),
+			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
+			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeInvalidPrefer),
+			Message:  d.Message,
+		})
+	}
+
 	return diags
 }
 

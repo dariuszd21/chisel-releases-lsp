@@ -291,3 +291,53 @@ func TestParseBytes_V3EssentialBackCompat(t *testing.T) {
 		t.Errorf("unexpected slice essential values: %v", myslice.Essential)
 	}
 }
+
+func TestParseContents_PreferInline(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: p
+slices:
+  s:
+    contents:
+      /usr/lib/libssl.so.3: {prefer: openssl}
+      /usr/bin/foo:
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := sf.Slices["s"].Contents
+	if len(contents) != 2 {
+		t.Fatalf("expected 2 contents entries, got %d", len(contents))
+	}
+	if contents[0].Prefer != "openssl" {
+		t.Errorf("expected Prefer=openssl, got %q", contents[0].Prefer)
+	}
+	if contents[0].PreferRange.Start.Line == 0 && contents[0].PreferRange.End.Line == 0 {
+		t.Error("PreferRange should be non-zero for inline prefer")
+	}
+	if contents[1].Prefer != "" {
+		t.Errorf("expected empty Prefer for entry without prefer, got %q", contents[1].Prefer)
+	}
+}
+
+func TestParseContents_PreferBlock(t *testing.T) {
+	sf, err := parser.ParseBytes([]byte(`package: p
+slices:
+  s:
+    contents:
+      /usr/lib/libssl.so.3:
+        prefer: openssl
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := sf.Slices["s"].Contents
+	if len(contents) != 1 {
+		t.Fatalf("expected 1 contents entry, got %d", len(contents))
+	}
+	if contents[0].Prefer != "openssl" {
+		t.Errorf("expected Prefer=openssl, got %q", contents[0].Prefer)
+	}
+	// PreferRange should point at the value "openssl", not the key "prefer".
+	if contents[0].PreferRange.Start.Character == 0 {
+		t.Error("PreferRange should not start at column 0 (should point at the value)")
+	}
+}
