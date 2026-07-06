@@ -3068,9 +3068,9 @@ slices:
 
 func TestFindBlockEnd_SingleLineEntries(t *testing.T) {
 	lines := []string{
-		"      /usr/bin/a:",  // line 0
-		"      /usr/bin/b:",  // line 1
-		"  next_section:",    // line 2 — shallower indent
+		"      /usr/bin/a:", // line 0
+		"      /usr/bin/b:", // line 1
+		"  next_section:",   // line 2 — shallower indent
 	}
 	if got := lsp.ExportFindBlockEnd(lines, 1); got != 2 {
 		t.Errorf("expected blockEnd=2, got %d", got)
@@ -3080,8 +3080,8 @@ func TestFindBlockEnd_SingleLineEntries(t *testing.T) {
 func TestFindBlockEnd_MultiLineEntry(t *testing.T) {
 	lines := []string{
 		"      /usr/lib/foo.so:", // line 0 — entry key
-		"        arch: [amd64]", // line 1 — sub-key (deeper indent)
-		"  next_section:",       // line 2 — shallower indent
+		"        arch: [amd64]",  // line 1 — sub-key (deeper indent)
+		"  next_section:",        // line 2 — shallower indent
 	}
 	if got := lsp.ExportFindBlockEnd(lines, 0); got != 2 {
 		t.Errorf("expected blockEnd=2, got %d", got)
