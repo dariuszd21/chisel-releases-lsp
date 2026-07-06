@@ -625,3 +625,161 @@ slices:
 		t.Errorf("expected no duplicates, got %d: %v", len(dups), dups)
 	}
 }
+
+// --- CheckLexicalOrder ---
+
+func TestCheckLexicalOrder_ContentsSorted(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    contents:
+      /usr/bin/a:
+      /usr/bin/b:
+      /usr/bin/c:
+`)
+	if diags := analysis.CheckLexicalOrder("p.yaml", sf); len(diags) != 0 {
+		t.Errorf("expected no diagnostics for sorted contents, got: %v", diags)
+	}
+}
+
+func TestCheckLexicalOrder_ContentsOutOfOrder(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    contents:
+      /usr/bin/z:
+      /usr/bin/a:
+`)
+	diags := analysis.CheckLexicalOrder("p.yaml", sf)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "/usr/bin/a") || !strings.Contains(diags[0].Message, "/usr/bin/z") {
+		t.Errorf("message should mention both paths, got: %q", diags[0].Message)
+	}
+	if diags[0].Severity != analysis.SeverityWarning {
+		t.Errorf("expected Warning severity, got %v", diags[0].Severity)
+	}
+}
+
+func TestCheckLexicalOrder_ContentsOnlyOneEntry(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    contents:
+      /usr/bin/a:
+`)
+	if diags := analysis.CheckLexicalOrder("p.yaml", sf); len(diags) != 0 {
+		t.Errorf("expected no diagnostics for single-entry contents, got: %v", diags)
+	}
+}
+
+func TestCheckLexicalOrder_EssentialSliceLevelOutOfOrder(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    essential:
+      - zlib1g_libs
+      - libc6_libs
+    contents:
+      /usr/bin/a:
+`)
+	diags := analysis.CheckLexicalOrder("p.yaml", sf)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "libc6_libs") || !strings.Contains(diags[0].Message, "zlib1g_libs") {
+		t.Errorf("message should mention both refs, got: %q", diags[0].Message)
+	}
+}
+
+func TestCheckLexicalOrder_EssentialPackageLevelOutOfOrder(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+essential:
+  - zlib1g_libs
+  - libc6_libs
+slices:
+  s:
+    contents:
+      /usr/bin/a:
+`)
+	diags := analysis.CheckLexicalOrder("p.yaml", sf)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "package-level") {
+		t.Errorf("message should mention package-level, got: %q", diags[0].Message)
+	}
+}
+
+func TestCheckLexicalOrder_MultipleViolations(t *testing.T) {
+	// Both the slice essential and contents blocks are out of order.
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    essential:
+      - zlib1g_libs
+      - libc6_libs
+    contents:
+      /usr/bin/z:
+      /usr/bin/a:
+`)
+	diags := analysis.CheckLexicalOrder("p.yaml", sf)
+	if len(diags) != 2 {
+		t.Fatalf("expected 2 diagnostics (one per block), got %d: %v", len(diags), diags)
+	}
+}
+
+func TestCheckLexicalOrder_AlreadySorted(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+essential:
+  - libc6_libs
+  - zlib1g_libs
+slices:
+  s:
+    essential:
+      - libc6_libs
+      - openssl_libs
+    contents:
+      /usr/bin/a:
+      /usr/bin/b:
+`)
+	if diags := analysis.CheckLexicalOrder("p.yaml", sf); len(diags) != 0 {
+		t.Errorf("expected no diagnostics for fully sorted file, got: %v", diags)
+	}
+}
+
+func TestCheckLexicalOrder_V3EssentialOutOfOrder(t *testing.T) {
+	// v3 map-style essential: keys should be subject to the same lexical check.
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    essential:
+      zlib1g_libs:
+      libc6_libs: {arch: amd64}
+    contents:
+      /usr/bin/a:
+`)
+	diags := analysis.CheckLexicalOrder("p.yaml", sf)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for v3 out-of-order essential, got %d: %v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "libc6_libs") || !strings.Contains(diags[0].Message, "zlib1g_libs") {
+		t.Errorf("message should mention both refs, got: %q", diags[0].Message)
+	}
+}
+
+func TestCheckLexicalOrder_V3EssentialSorted(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    essential:
+      libc6_libs:
+      zlib1g_libs: {arch: amd64}
+    contents:
+      /usr/bin/a:
+`)
+	if diags := analysis.CheckLexicalOrder("p.yaml", sf); len(diags) != 0 {
+		t.Errorf("expected no diagnostics for sorted v3 essential, got: %v", diags)
+	}
+}

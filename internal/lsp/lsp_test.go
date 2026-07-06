@@ -3063,3 +3063,391 @@ slices:
 		t.Errorf("expected empty NewText (deletion), got %q", edit.NewText)
 	}
 }
+
+// --- sortedBlockText / findBlockEnd unit tests ---
+
+func TestFindBlockEnd_SingleLineEntries(t *testing.T) {
+	lines := []string{
+		"      /usr/bin/a:", // line 0
+		"      /usr/bin/b:", // line 1
+		"  next_section:",   // line 2 — shallower indent
+	}
+	if got := lsp.ExportFindBlockEnd(lines, 1); got != 2 {
+		t.Errorf("expected blockEnd=2, got %d", got)
+	}
+}
+
+func TestFindBlockEnd_MultiLineEntry(t *testing.T) {
+	lines := []string{
+		"      /usr/lib/foo.so:", // line 0 — entry key
+		"        arch: [amd64]",  // line 1 — sub-key (deeper indent)
+		"  next_section:",        // line 2 — shallower indent
+	}
+	if got := lsp.ExportFindBlockEnd(lines, 0); got != 2 {
+		t.Errorf("expected blockEnd=2, got %d", got)
+	}
+}
+
+func TestFindBlockEnd_BlankLineTerminates(t *testing.T) {
+	lines := []string{
+		"      /usr/bin/a:", // line 0
+		"        arch: [x]", // line 1
+		"",                  // line 2 — blank terminates
+		"      /usr/bin/b:", // line 3
+	}
+	if got := lsp.ExportFindBlockEnd(lines, 0); got != 2 {
+		t.Errorf("expected blockEnd=2 (blank line), got %d", got)
+	}
+}
+
+func TestFindBlockEnd_EOF(t *testing.T) {
+	lines := []string{
+		"      /usr/bin/a:",
+		"        arch: [x]",
+	}
+	if got := lsp.ExportFindBlockEnd(lines, 0); got != 2 {
+		t.Errorf("expected blockEnd=len(lines)=2, got %d", got)
+	}
+}
+
+func TestSortedBlockText_SingleLineEntries(t *testing.T) {
+	lines := []string{
+		"      /usr/bin/z:",
+		"      /usr/bin/a:",
+		"      /usr/bin/m:",
+	}
+	entries := []lsp.SortableEntryForTest{
+		{Key: "/usr/bin/z", Line: 0},
+		{Key: "/usr/bin/a", Line: 1},
+		{Key: "/usr/bin/m", Line: 2},
+	}
+	got := lsp.ExportSortedBlockText(lines, entries, 3)
+	want := "      /usr/bin/a:\n      /usr/bin/m:\n      /usr/bin/z:\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestSortedBlockText_MultiLineEntries(t *testing.T) {
+	lines := []string{
+		"      /usr/lib/z.so:",  // line 0
+		"        arch: [amd64]", // line 1 — travels with z
+		"      /usr/lib/a.so:",  // line 2
+		"        arch: [arm64]", // line 3 — travels with a
+	}
+	entries := []lsp.SortableEntryForTest{
+		{Key: "/usr/lib/z.so", Line: 0},
+		{Key: "/usr/lib/a.so", Line: 2},
+	}
+	blockEnd := lsp.ExportFindBlockEnd(lines, 2)
+	got := lsp.ExportSortedBlockText(lines, entries, blockEnd)
+	want := "      /usr/lib/a.so:\n        arch: [arm64]\n      /usr/lib/z.so:\n        arch: [amd64]\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestSortedBlockText_AlreadySorted(t *testing.T) {
+	lines := []string{
+		"  - libc6_libs",
+		"  - zlib1g_libs",
+	}
+	entries := []lsp.SortableEntryForTest{
+		{Key: "libc6_libs", Line: 0},
+		{Key: "zlib1g_libs", Line: 1},
+	}
+	got := lsp.ExportSortedBlockText(lines, entries, 2)
+	want := "  - libc6_libs\n  - zlib1g_libs\n"
+	if got != want {
+		t.Errorf("already-sorted input should be unchanged: got %q", got)
+	}
+}
+
+func TestCodeAction_OutOfOrder_V3Essential(t *testing.T) {
+	// v3 map-style essential with an inline arch constraint.
+	// The arch value is on the same line as the key so it must stay attached after sorting.
+	content := `package: mypkg
+slices:
+  libs:
+    essential:
+      zlib1g_libs:
+      libc6_libs: {arch: amd64}
+    contents:
+      /usr/lib/a.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var ooDiag protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeOutOfOrder {
+			ooDiag = d
+		}
+	}
+	if ooDiag.Message == "" {
+		t.Fatal("no out-of-order diagnostic found for v3 essential")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{ooDiag})
+	var sortAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Sort entries lexically" {
+			sortAction = &actions[i]
+		}
+	}
+	if sortAction == nil {
+		t.Fatal("expected sort action for v3 out-of-order essential, got none")
+	}
+
+	edits := sortAction.Edit.Changes[lsp.ExportFilePathToURI(filePath)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 text edit, got %d", len(edits))
+	}
+	got := edits[0].NewText
+	// libc6_libs must come first, with its arch constraint intact on the same line.
+	if strings.Index(got, "libc6_libs") > strings.Index(got, "zlib1g_libs") {
+		t.Errorf("libc6_libs should sort before zlib1g_libs, got: %q", got)
+	}
+	if !strings.Contains(got, "libc6_libs: {arch: amd64}") {
+		t.Errorf("arch constraint should remain on libc6_libs line, got: %q", got)
+	}
+}
+
+func TestComputeDiagnostics_OutOfOrder(t *testing.T) {
+	content := `package: mypkg
+slices:
+  libs:
+    contents:
+      /usr/lib/z.so:
+      /usr/lib/a.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+
+	found := false
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeOutOfOrder {
+			found = true
+			if !strings.Contains(d.Message, "/usr/lib/a.so") {
+				t.Errorf("diagnostic message should mention out-of-order path, got: %q", d.Message)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected out-of-order diagnostic, got: %v", diags)
+	}
+}
+
+func TestCodeAction_OutOfOrder_SortsFix(t *testing.T) {
+	content := `package: mypkg
+slices:
+  libs:
+    contents:
+      /usr/lib/z.so:
+      /usr/lib/a.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	// Find the out-of-order diagnostic.
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var ooDiag protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeOutOfOrder {
+			ooDiag = d
+		}
+	}
+	if ooDiag.Message == "" {
+		t.Fatal("no out-of-order diagnostic found")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{ooDiag})
+
+	var sortAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Sort entries lexically" {
+			sortAction = &actions[i]
+		}
+	}
+	if sortAction == nil {
+		t.Fatal("expected 'Sort entries lexically' code action, got none")
+	}
+
+	// Verify the edit replaces the block with sorted content.
+	edits := sortAction.Edit.Changes[lsp.ExportFilePathToURI(filePath)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 text edit, got %d", len(edits))
+	}
+	got := edits[0].NewText
+	if !strings.Contains(got, "/usr/lib/a.so") || !strings.Contains(got, "/usr/lib/z.so") {
+		t.Errorf("sorted text should contain both paths, got: %q", got)
+	}
+	// a.so must appear before z.so in the sorted output.
+	if strings.Index(got, "/usr/lib/a.so") > strings.Index(got, "/usr/lib/z.so") {
+		t.Errorf("a.so should sort before z.so, got: %q", got)
+	}
+}
+
+func TestCodeAction_OutOfOrder_PackageLevelEssential(t *testing.T) {
+	content := `package: mypkg
+essential:
+  - zlib1g_libs
+  - libc6_libs
+slices:
+  libs:
+    contents:
+      /usr/lib/a.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var ooDiag protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeOutOfOrder {
+			ooDiag = d
+		}
+	}
+	if ooDiag.Message == "" {
+		t.Fatal("no out-of-order diagnostic found for package-level essential")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{ooDiag})
+	var sortAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Sort entries lexically" {
+			sortAction = &actions[i]
+		}
+	}
+	if sortAction == nil {
+		t.Fatal("expected sort action for out-of-order package-level essential, got none")
+	}
+
+	edits := sortAction.Edit.Changes[lsp.ExportFilePathToURI(filePath)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 text edit, got %d", len(edits))
+	}
+	got := edits[0].NewText
+	if strings.Index(got, "libc6_libs") > strings.Index(got, "zlib1g_libs") {
+		t.Errorf("libc6_libs should sort before zlib1g_libs, got: %q", got)
+	}
+}
+
+func TestCodeAction_OutOfOrder_MultiLineEntries(t *testing.T) {
+	// Each content entry has an arch: sub-key on the following line.
+	// The sort fix must move the arch: line together with its parent entry.
+	content := `package: mypkg
+slices:
+  libs:
+    contents:
+      /usr/lib/z-driver.so:
+        arch: [amd64]
+      /usr/lib/a-driver.so:
+        arch: [arm64]
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var ooDiag protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeOutOfOrder {
+			ooDiag = d
+		}
+	}
+	if ooDiag.Message == "" {
+		t.Fatal("no out-of-order diagnostic found")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{ooDiag})
+	var sortAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Sort entries lexically" {
+			sortAction = &actions[i]
+		}
+	}
+	if sortAction == nil {
+		t.Fatal("expected sort action, got none")
+	}
+
+	edits := sortAction.Edit.Changes[lsp.ExportFilePathToURI(filePath)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 text edit, got %d", len(edits))
+	}
+	got := edits[0].NewText
+
+	// a-driver must appear before z-driver.
+	posA := strings.Index(got, "a-driver")
+	posZ := strings.Index(got, "z-driver")
+	if posA < 0 || posZ < 0 || posA > posZ {
+		t.Errorf("a-driver should sort before z-driver, got:\n%s", got)
+	}
+	// arch: [arm64] must follow a-driver (not z-driver).
+	posArm := strings.Index(got, "arm64")
+	posAmd := strings.Index(got, "amd64")
+	if posArm < 0 || posAmd < 0 {
+		t.Fatalf("both arch lines must be present")
+	}
+	if posA > posArm || posArm > posZ {
+		t.Errorf("arch: [arm64] should be between a-driver and z-driver entries, got:\n%s", got)
+	}
+}
+
+func TestCodeAction_OutOfOrder_Essential(t *testing.T) {
+	content := `package: mypkg
+slices:
+  libs:
+    essential:
+      - zlib1g_libs
+      - libc6_libs
+    contents:
+      /usr/lib/a.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var ooDiag protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeOutOfOrder {
+			ooDiag = d
+		}
+	}
+	if ooDiag.Message == "" {
+		t.Fatal("no out-of-order diagnostic found")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{ooDiag})
+	var sortAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Sort entries lexically" {
+			sortAction = &actions[i]
+		}
+	}
+	if sortAction == nil {
+		t.Fatal("expected sort action for out-of-order essential, got none")
+	}
+
+	edits := sortAction.Edit.Changes[lsp.ExportFilePathToURI(filePath)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 text edit, got %d", len(edits))
+	}
+	got := edits[0].NewText
+	if strings.Index(got, "libc6_libs") > strings.Index(got, "zlib1g_libs") {
+		t.Errorf("libc6_libs should sort before zlib1g_libs, got: %q", got)
+	}
+}

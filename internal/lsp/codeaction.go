@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/dariuszd21/chisel-releases-lsp/internal/analysis"
+	"github.com/dariuszd21/chisel-releases-lsp/internal/parser"
 )
 
 func (s *Server) textDocumentCodeAction(_ *glsp.Context, params *protocol.CodeActionParams) (any, error) {
@@ -204,6 +206,37 @@ func (s *Server) computeCodeActions(
 					},
 				},
 			})
+		case DiagCodeOutOfOrder:
+			if s.idx == nil {
+				continue
+			}
+			sf := s.idx.FileSliceFile(filePath)
+			if sf == nil {
+				continue
+			}
+			diagLine := int(diag.Range.Start.Line)
+			entries, blockFirst := findOutOfOrderBlock(sf, diagLine)
+			if len(entries) < 2 {
+				continue
+			}
+			blockLast := entries[len(entries)-1].line
+			blockEnd := findBlockEnd(lines, blockLast)
+			newText := sortedBlockText(lines, entries, blockEnd)
+			editRange := protocol.Range{
+				Start: protocol.Position{Line: uint32(blockFirst), Character: 0},
+				End:   protocol.Position{Line: uint32(blockEnd), Character: 0},
+			}
+			actions = append(actions, protocol.CodeAction{
+				Title:       "Sort entries lexically",
+				Kind:        &quickFix,
+				Diagnostics: []protocol.Diagnostic{diag},
+				IsPreferred: &trueVal,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+						uri: {{Range: editRange, NewText: newText}},
+					},
+				},
+			})
 		}
 	}
 	return actions
@@ -318,4 +351,109 @@ func fullLineDeleteRange(lines []string, lineNum int) protocol.Range {
 		Start: start,
 		End:   protocol.Position{Line: uint32(lineNum), Character: uint32(len(lines[lineNum]))},
 	}
+}
+
+// sortableEntry pairs a sort key with the 0-based line number of the entry in
+// the document. Used by the out-of-order sort quick fix.
+type sortableEntry struct {
+	key  string
+	line int
+}
+
+// findOutOfOrderBlock searches sf for the block (package-level essential,
+// per-slice essential, or per-slice contents) that contains diagLine, and
+// returns all entries of that block together with the line of the first entry.
+// Returns nil if no block is found.
+func findOutOfOrderBlock(sf *parser.SliceFile, diagLine int) (entries []sortableEntry, blockFirst int) {
+	if e := essentialToSortable(sf.Essential); len(e) > 0 {
+		for _, s := range e {
+			if s.line == diagLine {
+				return e, e[0].line
+			}
+		}
+	}
+	for _, name := range sf.SliceOrder {
+		sd := sf.Slices[name]
+		if e := essentialToSortable(sd.Essential); len(e) > 0 {
+			for _, s := range e {
+				if s.line == diagLine {
+					return e, e[0].line
+				}
+			}
+		}
+		if e := contentsToSortable(sd.Contents); len(e) > 0 {
+			for _, s := range e {
+				if s.line == diagLine {
+					return e, e[0].line
+				}
+			}
+		}
+	}
+	return nil, 0
+}
+
+func essentialToSortable(refs []parser.EssentialRef) []sortableEntry {
+	e := make([]sortableEntry, len(refs))
+	for i, ref := range refs {
+		e[i] = sortableEntry{key: ref.Value, line: ref.ValueRange.Start.Line}
+	}
+	return e
+}
+
+func contentsToSortable(contents []parser.ContentEntry) []sortableEntry {
+	e := make([]sortableEntry, len(contents))
+	for i, ce := range contents {
+		e[i] = sortableEntry{key: ce.Path, line: ce.PathRange.Start.Line}
+	}
+	return e
+}
+
+// sortedBlockText returns the sorted text for the block spanning [entries[0].line,
+// blockEnd). Each entry's text runs from its own line up to (but not including)
+// the next entry's line; the last entry runs to blockEnd.
+func sortedBlockText(lines []string, entries []sortableEntry, blockEnd int) string {
+	type chunk struct {
+		key  string
+		text string
+	}
+	chunks := make([]chunk, len(entries))
+	for i, e := range entries {
+		endLine := blockEnd
+		if i+1 < len(entries) {
+			endLine = entries[i+1].line
+		}
+		var sb strings.Builder
+		for l := e.line; l < endLine && l < len(lines); l++ {
+			sb.WriteString(lines[l])
+			sb.WriteByte('\n')
+		}
+		chunks[i] = chunk{key: e.key, text: sb.String()}
+	}
+	sort.Slice(chunks, func(i, j int) bool { return chunks[i].key < chunks[j].key })
+	var sb strings.Builder
+	for _, c := range chunks {
+		sb.WriteString(c.text)
+	}
+	return sb.String()
+}
+
+// findBlockEnd returns the first line index after lastEntryLine whose content
+// (if non-blank) has indentation ≤ lastEntryLine's indentation, signalling the
+// end of the entry's value block. Returns len(lines) when the entry runs to EOF.
+func findBlockEnd(lines []string, lastEntryLine int) int {
+	if lastEntryLine >= len(lines) {
+		return len(lines)
+	}
+	indent := lineIndent(lines[lastEntryLine])
+	for i := lastEntryLine + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" || lineIndent(lines[i]) <= indent {
+			return i
+		}
+	}
+	return len(lines)
+}
+
+// lineIndent returns the number of leading space/tab characters in s.
+func lineIndent(s string) int {
+	return len(s) - len(strings.TrimLeft(s, " \t"))
 }

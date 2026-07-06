@@ -284,6 +284,65 @@ func DetectDuplicateSlices(idx *index.Index) []DuplicateSlice {
 	return dups
 }
 
+// CheckLexicalOrder returns a Warning for each block (package-level essential:,
+// per-slice essential:, or per-slice contents:) whose entries are not in
+// lexical (ascending) order. One diagnostic is emitted per out-of-order block,
+// pointing at the first entry that violates the ordering.
+func CheckLexicalOrder(filePath string, sf *parser.SliceFile) []Diagnostic {
+	var diags []Diagnostic
+	if d := checkEssentialOrder(filePath, "", sf.Essential); d != nil {
+		diags = append(diags, *d)
+	}
+	for _, name := range sf.SliceOrder {
+		sd := sf.Slices[name]
+		if d := checkEssentialOrder(filePath, name, sd.Essential); d != nil {
+			diags = append(diags, *d)
+		}
+		if d := checkContentsOrder(filePath, name, sd.Contents); d != nil {
+			diags = append(diags, *d)
+		}
+	}
+	return diags
+}
+
+func checkEssentialOrder(filePath, sliceName string, refs []parser.EssentialRef) *Diagnostic {
+	for i := 1; i < len(refs); i++ {
+		if refs[i].Value < refs[i-1].Value {
+			scope := "package-level"
+			if sliceName != "" {
+				scope = fmt.Sprintf("slice %q", sliceName)
+			}
+			return &Diagnostic{
+				File:  filePath,
+				Range: refs[i].ValueRange,
+				Message: fmt.Sprintf(
+					"%s essential: entries are not in lexical order (%q should come before %q)",
+					scope, refs[i].Value, refs[i-1].Value,
+				),
+				Severity: SeverityWarning,
+			}
+		}
+	}
+	return nil
+}
+
+func checkContentsOrder(filePath, sliceName string, contents []parser.ContentEntry) *Diagnostic {
+	for i := 1; i < len(contents); i++ {
+		if contents[i].Path < contents[i-1].Path {
+			return &Diagnostic{
+				File:  filePath,
+				Range: contents[i].PathRange,
+				Message: fmt.Sprintf(
+					"slice %q contents: paths are not in lexical order (%q should come before %q)",
+					sliceName, contents[i].Path, contents[i-1].Path,
+				),
+				Severity: SeverityWarning,
+			}
+		}
+	}
+	return nil
+}
+
 // DuplicateEssential describes a repeated pkg_slice reference. This covers two
 // cases:
 //   - Within a single block: the same value appears more than once in the same
