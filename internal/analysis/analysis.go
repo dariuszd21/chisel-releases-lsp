@@ -200,9 +200,10 @@ func DetectCollisions(idx *index.Index) []Collision {
 }
 
 // ValidatePrefer checks every content entry that carries a prefer: attribute
-// and reports diagnostics for three invalid usages:
+// and reports diagnostics for four invalid usages:
 //   - prefer: on a glob path (meaningless — globs are never checked for collisions)
 //   - prefer: naming the same package as the file itself
+//   - mutual prefer: the named package also declares prefer: back at this package on the same path
 //   - prefer: naming a package that does not exist in the release
 func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []Diagnostic {
 	var diags []Diagnostic
@@ -232,6 +233,18 @@ func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []D
 				})
 				continue
 			}
+			if isMutualPrefer(ce.Path, sf.Package, ce.Prefer, idx) {
+				diags = append(diags, Diagnostic{
+					File:  filePath,
+					Range: ce.PreferRange,
+					Message: fmt.Sprintf(
+						"mutual prefer: %q also declares prefer: %q on %q — only one side should declare prefer:",
+						ce.Prefer, sf.Package, ce.Path,
+					),
+					Severity: SeverityError,
+				})
+				continue
+			}
 			if !idx.PackageExists(ce.Prefer) {
 				diags = append(diags, Diagnostic{
 					File:  filePath,
@@ -246,6 +259,26 @@ func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []D
 		}
 	}
 	return diags
+}
+
+// isMutualPrefer reports whether the package named by preferTarget also declares
+// prefer: thisPackage on the same path. Both sides declaring prefer: at each other
+// is contradictory — chisel cannot determine which package's file to use.
+func isMutualPrefer(path, thisPackage, preferTarget string, idx *index.Index) bool {
+	for _, otherFile := range idx.AllFiles() {
+		otherSf := idx.FileSliceFile(otherFile)
+		if otherSf == nil || otherSf.Package != preferTarget {
+			continue
+		}
+		for _, sd := range otherSf.Slices {
+			for _, ce := range sd.Contents {
+				if ce.Path == path && ce.Prefer == thisPackage {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // isGlob reports whether a path contains chisel glob metacharacters (*, ?).

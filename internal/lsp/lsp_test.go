@@ -3531,3 +3531,42 @@ slices:
 		t.Error("expected invalid-prefer diagnostic for unknown package")
 	}
 }
+
+func TestComputeDiagnostics_MutualPrefer(t *testing.T) {
+	// Both packages prefer each other — ValidatePrefer must flag it as an Error
+	// on the side being diagnosed, and no generic collision warning should appear.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	diags := srv.ExportComputeDiagnostics(pkgaPath)
+
+	foundMutual := false
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeSliceCollision {
+			t.Errorf("collision warning should be suppressed for mutual prefer, got: %q", d.Message)
+		}
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeInvalidPrefer {
+			foundMutual = true
+			if !strings.Contains(d.Message, "mutual prefer") {
+				t.Errorf("expected mutual prefer message, got: %q", d.Message)
+			}
+		}
+	}
+	if !foundMutual {
+		t.Error("expected invalid-prefer diagnostic for mutual prefer, got none")
+	}
+}

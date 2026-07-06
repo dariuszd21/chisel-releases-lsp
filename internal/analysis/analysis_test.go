@@ -808,7 +808,9 @@ slices:
 }
 
 func TestDetectCollisions_MutualPrefer(t *testing.T) {
-	// Both sides prefer each other — collision must still be suppressed.
+	// Both sides prefer each other — the generic collision is still suppressed
+	// (DetectCollisions treats it as acknowledged). ValidatePrefer catches
+	// the contradiction as a separate Error diagnostic.
 	idx := setupCollisionIndex(t, map[string]string{
 		"pkga.yaml": `package: pkga
 slices:
@@ -824,7 +826,7 @@ slices:
 `,
 	})
 	if collisions := analysis.DetectCollisions(idx); len(collisions) != 0 {
-		t.Errorf("expected no collisions with mutual prefer, got: %+v", collisions)
+		t.Errorf("expected no collisions with mutual prefer (ValidatePrefer handles it), got: %+v", collisions)
 	}
 }
 
@@ -929,6 +931,43 @@ slices:
 	}
 	if !strings.Contains(diags[0].Message, "nonexistent") {
 		t.Errorf("message should mention the unknown package, got: %q", diags[0].Message)
+	}
+}
+
+func TestValidatePrefer_MutualPrefer(t *testing.T) {
+	// Both packages prefer each other on the same path — this is contradictory
+	// and must be flagged as an Error on both sides.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+	})
+	files := idx.AllFiles()
+	var pkgaFile string
+	for _, f := range files {
+		if idx.FileSliceFile(f).Package == "pkga" {
+			pkgaFile = f
+		}
+	}
+	sf := idx.FileSliceFile(pkgaFile)
+	diags := analysis.ValidatePrefer(pkgaFile, sf, idx)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 mutual-prefer diagnostic, got %d: %v", len(diags), diags)
+	}
+	if diags[0].Severity != analysis.SeverityError {
+		t.Errorf("expected Error severity, got %v", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, "mutual prefer") {
+		t.Errorf("message should mention mutual prefer, got: %q", diags[0].Message)
 	}
 }
 
