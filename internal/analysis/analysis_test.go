@@ -830,6 +830,35 @@ slices:
 	}
 }
 
+func TestDetectCollisions_PreferTransitiveSuppresses(t *testing.T) {
+	// Chain: C→B→A (C has prefer: B, B has prefer: A).
+	// All three claim the same path. A is last in the chain, so A's file is
+	// installed for all three. No collision should be reported for any pair.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+		"pkgc.yaml": `package: pkgc
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+	})
+	if collisions := analysis.DetectCollisions(idx); len(collisions) != 0 {
+		t.Errorf("expected no collisions for transitive prefer chain C→B→A, got: %+v", collisions)
+	}
+}
+
 func TestDetectCollisions_PreferWrongPackage(t *testing.T) {
 	// prefer points at a third package, not the actual conflicting one — collision must fire.
 	idx := setupCollisionIndex(t, map[string]string{
@@ -935,8 +964,8 @@ slices:
 }
 
 func TestValidatePrefer_MutualPrefer(t *testing.T) {
-	// Both packages prefer each other on the same path — this is contradictory
-	// and must be flagged as an Error on both sides.
+	// Both packages prefer each other on the same path — this forms a cycle
+	// in the prefer chain, which is invalid (prefer must be a linear sequence).
 	idx := setupCollisionIndex(t, map[string]string{
 		"pkga.yaml": `package: pkga
 slices:
@@ -966,8 +995,8 @@ slices:
 	if diags[0].Severity != analysis.SeverityError {
 		t.Errorf("expected Error severity, got %v", diags[0].Severity)
 	}
-	if !strings.Contains(diags[0].Message, "mutual prefer") {
-		t.Errorf("message should mention mutual prefer, got: %q", diags[0].Message)
+	if !strings.Contains(diags[0].Message, "cycle") {
+		t.Errorf("message should mention cycle, got: %q", diags[0].Message)
 	}
 }
 

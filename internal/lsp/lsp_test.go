@@ -3554,19 +3554,19 @@ slices:
 
 	diags := srv.ExportComputeDiagnostics(pkgaPath)
 
-	foundMutual := false
+	foundCycleDiag := false
 	for _, d := range diags {
 		if d.Code != nil && d.Code.Value == lsp.DiagCodeSliceCollision {
-			t.Errorf("collision warning should be suppressed for mutual prefer, got: %q", d.Message)
+			t.Errorf("collision warning should be suppressed for prefer cycle, got: %q", d.Message)
 		}
 		if d.Code != nil && d.Code.Value == lsp.DiagCodeInvalidPrefer {
-			foundMutual = true
-			if !strings.Contains(d.Message, "mutual prefer") {
-				t.Errorf("expected mutual prefer message, got: %q", d.Message)
+			foundCycleDiag = true
+			if !strings.Contains(d.Message, "cycle") {
+				t.Errorf("expected cycle message, got: %q", d.Message)
 			}
 		}
 	}
-	if !foundMutual {
-		t.Error("expected invalid-prefer diagnostic for mutual prefer, got none")
+	if !foundCycleDiag {
+		t.Error("expected invalid-prefer diagnostic for prefer cycle, got none")
 	}
 }
