@@ -830,6 +830,38 @@ slices:
 	}
 }
 
+func TestDetectCollisions_PreferFanIn(t *testing.T) {
+	// B→A and C→A: both B and C defer to A's file when A is present.
+	// However, B and C are NOT in the same linear chain — they are not ordered
+	// relative to each other. Without A, B and C conflict on the path, so the
+	// B-C collision must still be reported.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+		"pkgc.yaml": `package: pkgc
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+	})
+	collisions := analysis.DetectCollisions(idx)
+	// B-A and C-A are suppressed by prefer; B-C is not.
+	if len(collisions) != 1 {
+		t.Errorf("expected 1 collision (B-C), got %d: %+v", len(collisions), collisions)
+	}
+}
+
 func TestDetectCollisions_PreferTransitiveSuppresses(t *testing.T) {
 	// Chain: C→B→A (C has prefer: B, B has prefer: A).
 	// All three claim the same path. A is last in the chain, so A's file is

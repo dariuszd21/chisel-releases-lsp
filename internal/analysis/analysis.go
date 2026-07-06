@@ -162,21 +162,23 @@ func DetectCollisions(idx *index.Index) []Collision {
 			reps = append(reps, es[0])
 		}
 		sort.Slice(reps, func(i, j int) bool { return reps[i].pkg < reps[j].pkg })
+		// Build the prefer graph for this path once, shared across all pairs.
+		preferGraph := make(map[string]string, len(pkgSet))
+		for pkg, es := range pkgSet {
+			for _, e := range es {
+				if e.prefer != "" {
+					preferGraph[pkg] = e.prefer
+					break
+				}
+			}
+		}
 		for i := 0; i < len(reps); i++ {
 			for j := i + 1; j < len(reps); j++ {
 				a, b := reps[i], reps[j]
-				// Build the prefer graph for this path: pkg → preferred pkg.
-				preferGraph := make(map[string]string, len(pkgSet))
-				for pkg, es := range pkgSet {
-					for _, e := range es {
-						if e.prefer != "" {
-							preferGraph[pkg] = e.prefer
-							break
-						}
-					}
-				}
-				// Suppress when a and b are connected in the prefer chain
-				// (either directly or transitively via intermediate packages).
+				// Suppress when a and b are in the same linear prefer chain:
+				// a reaches b or b reaches a by following prefer links.
+				// Fan-in (B→A and C→A) does NOT suppress B-C: B and C are not
+				// ordered relative to each other and conflict without A present.
 				if preferReaches(preferGraph, a.pkg, b.pkg) || preferReaches(preferGraph, b.pkg, a.pkg) {
 					continue
 				}
@@ -196,8 +198,8 @@ func DetectCollisions(idx *index.Index) []Collision {
 }
 
 // preferReaches reports whether following prefer links from 'from' eventually
-// reaches 'to'. It terminates on cycles (via a visited set) or when the chain
-// ends with a package that has no prefer declaration.
+// reaches 'to', meaning they are part of the same linear prefer chain.
+// Terminates on cycles (via a visited set) or when the chain ends.
 func preferReaches(preferGraph map[string]string, from, to string) bool {
 	visited := make(map[string]bool)
 	curr := from
