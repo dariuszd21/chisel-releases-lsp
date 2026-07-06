@@ -3191,6 +3191,68 @@ slices:
 	}
 }
 
+func TestCodeAction_OutOfOrder_MultiLineEntries(t *testing.T) {
+	// Each content entry has an arch: sub-key on the following line.
+	// The sort fix must move the arch: line together with its parent entry.
+	content := `package: mypkg
+slices:
+  libs:
+    contents:
+      /usr/lib/z-driver.so:
+        arch: [amd64]
+      /usr/lib/a-driver.so:
+        arch: [arm64]
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var ooDiag protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeOutOfOrder {
+			ooDiag = d
+		}
+	}
+	if ooDiag.Message == "" {
+		t.Fatal("no out-of-order diagnostic found")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{ooDiag})
+	var sortAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Sort entries lexically" {
+			sortAction = &actions[i]
+		}
+	}
+	if sortAction == nil {
+		t.Fatal("expected sort action, got none")
+	}
+
+	edits := sortAction.Edit.Changes[lsp.ExportFilePathToURI(filePath)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 text edit, got %d", len(edits))
+	}
+	got := edits[0].NewText
+
+	// a-driver must appear before z-driver.
+	posA := strings.Index(got, "a-driver")
+	posZ := strings.Index(got, "z-driver")
+	if posA < 0 || posZ < 0 || posA > posZ {
+		t.Errorf("a-driver should sort before z-driver, got:\n%s", got)
+	}
+	// arch: [arm64] must follow a-driver (not z-driver).
+	posArm := strings.Index(got, "arm64")
+	posAmd := strings.Index(got, "amd64")
+	if posArm < 0 || posAmd < 0 {
+		t.Fatalf("both arch lines must be present")
+	}
+	if posA > posArm || posArm > posZ {
+		t.Errorf("arch: [arm64] should be between a-driver and z-driver entries, got:\n%s", got)
+	}
+}
+
 func TestCodeAction_OutOfOrder_Essential(t *testing.T) {
 	content := `package: mypkg
 slices:
