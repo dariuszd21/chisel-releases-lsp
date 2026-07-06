@@ -104,15 +104,15 @@ type Collision struct {
 
 // DetectCollisions finds all concrete (non-glob) paths that are claimed by
 // slices in two or more different packages with incompatible definitions.
-// Compatible = path appears in slices of the same package, or both entries
-// have identical inline attributes (both are plain extractions with no copy/text/etc).
-// For LSP purposes we flag cross-package duplicate concrete paths as collisions.
+// A collision is suppressed when the two packages are connected in the same
+// prefer chain (directly or transitively).
 func DetectCollisions(idx *index.Index) []Collision {
 	type entry struct {
 		pkg       string
 		sliceName string
 		file      string
 		r         parser.Range
+		prefer    string
 	}
 	// path → list of entries
 	pathMap := make(map[string][]entry)
@@ -132,6 +132,7 @@ func DetectCollisions(idx *index.Index) []Collision {
 					sliceName: sliceName,
 					file:      filePath,
 					r:         ce.PathRange,
+					prefer:    ce.Prefer,
 				})
 			}
 		}
@@ -161,9 +162,26 @@ func DetectCollisions(idx *index.Index) []Collision {
 			reps = append(reps, es[0])
 		}
 		sort.Slice(reps, func(i, j int) bool { return reps[i].pkg < reps[j].pkg })
+		// Build the prefer graph for this path once, shared across all pairs.
+		preferGraph := make(map[string]string, len(pkgSet))
+		for pkg, es := range pkgSet {
+			for _, e := range es {
+				if e.prefer != "" {
+					preferGraph[pkg] = e.prefer
+					break
+				}
+			}
+		}
 		for i := 0; i < len(reps); i++ {
 			for j := i + 1; j < len(reps); j++ {
 				a, b := reps[i], reps[j]
+				// Suppress when a and b are in the same linear prefer chain:
+				// a reaches b or b reaches a by following prefer links.
+				// Fan-in (B→A and C→A) does NOT suppress B-C: B and C are not
+				// ordered relative to each other and conflict without A present.
+				if preferReaches(preferGraph, a.pkg, b.pkg) || preferReaches(preferGraph, b.pkg, a.pkg) {
+					continue
+				}
 				collisions = append(collisions, Collision{
 					Path:   p,
 					SliceA: a.pkg + "_" + a.sliceName,
@@ -177,6 +195,111 @@ func DetectCollisions(idx *index.Index) []Collision {
 		}
 	}
 	return collisions
+}
+
+// preferReaches reports whether following prefer links from 'from' eventually
+// reaches 'to', meaning they are part of the same linear prefer chain.
+// Terminates on cycles (via a visited set) or when the chain ends.
+func preferReaches(preferGraph map[string]string, from, to string) bool {
+	visited := make(map[string]bool)
+	curr := from
+	for curr != "" && !visited[curr] {
+		visited[curr] = true
+		if curr == to {
+			return true
+		}
+		curr = preferGraph[curr]
+	}
+	return false
+}
+
+// ValidatePrefer checks every content entry that carries a prefer: attribute
+// and reports diagnostics for four invalid usages:
+//   - prefer: on a glob path (meaningless — globs are never checked for collisions)
+//   - prefer: naming the same package as the file itself
+//   - prefer: forming a cycle (the named package also declares prefer: back at this package
+//     on the same path — prefer must form a linear chain, not a cycle)
+//   - prefer: naming a package that does not exist in the release
+//
+// Note: transitive cycle detection (A→B→C→A) is not yet implemented.
+func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []Diagnostic {
+	var diags []Diagnostic
+	for _, name := range sf.SliceOrder {
+		for _, ce := range sf.Slices[name].Contents {
+			if ce.Prefer == "" {
+				continue
+			}
+			if isGlob(ce.Path) {
+				diags = append(diags, Diagnostic{
+					File:     filePath,
+					Range:    ce.PreferRange,
+					Message:  "prefer: is not valid on glob patterns",
+					Severity: SeverityError,
+				})
+				continue
+			}
+			if ce.Prefer == sf.Package {
+				diags = append(diags, Diagnostic{
+					File:  filePath,
+					Range: ce.PreferRange,
+					Message: fmt.Sprintf(
+						"prefer: must reference a different package, not %q",
+						ce.Prefer,
+					),
+					Severity: SeverityError,
+				})
+				continue
+			}
+			if isMutualPrefer(ce.Path, sf.Package, ce.Prefer, idx) {
+				diags = append(diags, Diagnostic{
+					File:  filePath,
+					Range: ce.PreferRange,
+					Message: fmt.Sprintf(
+						"prefer: cycle detected — %q also declares prefer: %q on %q; prefer must form a linear chain",
+						ce.Prefer, sf.Package, ce.Path,
+					),
+					Severity: SeverityError,
+				})
+				continue
+			}
+			if !idx.PackageExists(ce.Prefer) {
+				diags = append(diags, Diagnostic{
+					File:  filePath,
+					Range: ce.PreferRange,
+					Message: fmt.Sprintf(
+						"prefer: references unknown package %q",
+						ce.Prefer,
+					),
+					Severity: SeverityWarning,
+				})
+			}
+		}
+	}
+	return diags
+}
+
+// isMutualPrefer reports whether the package named by preferTarget also declares
+// prefer: thisPackage on the same path, forming a direct cycle. Chisel requires
+// prefer to form a linear chain (A→B→C); a direct cycle (A→B and B→A) means
+// no package is definitively last in the chain so chisel cannot determine which
+// file to install.
+//
+// Note: longer transitive cycles (A→B→C→A) are not yet detected.
+func isMutualPrefer(path, thisPackage, preferTarget string, idx *index.Index) bool {
+	for _, otherFile := range idx.AllFiles() {
+		otherSf := idx.FileSliceFile(otherFile)
+		if otherSf == nil || otherSf.Package != preferTarget {
+			continue
+		}
+		for _, sd := range otherSf.Slices {
+			for _, ce := range sd.Contents {
+				if ce.Path == path && ce.Prefer == thisPackage {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // isGlob reports whether a path contains chisel glob metacharacters (*, ?).

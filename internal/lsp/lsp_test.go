@@ -3451,3 +3451,122 @@ slices:
 		t.Errorf("libc6_libs should sort before zlib1g_libs, got: %q", got)
 	}
 }
+
+func TestComputeDiagnostics_PreferSuppressesCollision(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	for _, d := range srv.ExportComputeDiagnostics(pkgaPath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeSliceCollision {
+			t.Errorf("collision should be suppressed by prefer, got diagnostic: %q", d.Message)
+		}
+	}
+}
+
+func TestComputeDiagnostics_PreferOnGlob(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/a.so:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	found := false
+	for _, d := range srv.ExportComputeDiagnostics(pkgaPath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeInvalidPrefer {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected invalid-prefer diagnostic for prefer on glob")
+	}
+}
+
+func TestComputeDiagnostics_PreferUnknownPackage(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/a.so: {prefer: nonexistent}
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	found := false
+	for _, d := range srv.ExportComputeDiagnostics(pkgaPath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeInvalidPrefer {
+			found = true
+			if !strings.Contains(d.Message, "nonexistent") {
+				t.Errorf("message should name the unknown package, got: %q", d.Message)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected invalid-prefer diagnostic for unknown package")
+	}
+}
+
+func TestComputeDiagnostics_MutualPrefer(t *testing.T) {
+	// Both packages prefer each other — ValidatePrefer must flag it as an Error
+	// on the side being diagnosed, and no generic collision warning should appear.
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	diags := srv.ExportComputeDiagnostics(pkgaPath)
+
+	foundCycleDiag := false
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeSliceCollision {
+			t.Errorf("collision warning should be suppressed for prefer cycle, got: %q", d.Message)
+		}
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeInvalidPrefer {
+			foundCycleDiag = true
+			if !strings.Contains(d.Message, "cycle") {
+				t.Errorf("expected cycle message, got: %q", d.Message)
+			}
+		}
+	}
+	if !foundCycleDiag {
+		t.Error("expected invalid-prefer diagnostic for prefer cycle, got none")
+	}
+}

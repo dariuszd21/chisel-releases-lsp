@@ -25,8 +25,10 @@ type Range struct {
 
 // ContentEntry represents one path key under a slice's `contents:` block.
 type ContentEntry struct {
-	Path      string
-	PathRange Range
+	Path        string
+	PathRange   Range
+	Prefer      string // value of the prefer: attribute; empty if absent
+	PreferRange Range  // range of the prefer value, for diagnostics
 }
 
 // SliceDef represents a single named slice inside a package.
@@ -203,12 +205,26 @@ func parseContents(node *yaml.Node) ([]ContentEntry, error) {
 	}
 	var entries []ContentEntry
 	pairs := node.Content
-	for i := 0; i < len(pairs); i += 2 {
+	for i := 0; i+1 < len(pairs); i += 2 {
 		key := pairs[i]
-		entries = append(entries, ContentEntry{
+		val := pairs[i+1]
+		ce := ContentEntry{
 			Path:      key.Value,
 			PathRange: nodeRange(key),
-		})
+		}
+		// Parse optional attributes from the value node (inline or block mapping).
+		if val.Kind == yaml.MappingNode {
+			for j := 0; j+1 < len(val.Content); j += 2 {
+				attrKey := val.Content[j]
+				attrVal := val.Content[j+1]
+				if attrKey.Value == "prefer" {
+					ce.Prefer = attrVal.Value
+					ce.PreferRange = nodeRange(attrVal)
+					break
+				}
+			}
+		}
+		entries = append(entries, ce)
 	}
 	return entries, nil
 }

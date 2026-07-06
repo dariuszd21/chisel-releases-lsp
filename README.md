@@ -17,8 +17,10 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 | **Quick fixes** — remove unknown/invalid references; fix package name mismatches | `textDocument/codeAction` |
 | **Document symbols** — outline view showing the package and all its slices | `textDocument/documentSymbol` |
 | **Workspace symbols** — search all `pkg_slice` names across the release | `workspace/symbol` |
-| **Glob pattern validation** — flag invalid patterns in `contents:` | `textDocument/publishDiagnostics` |
-| **Slice collision detection** — warn when two packages claim the same path | `textDocument/publishDiagnostics` |
+| **Glob pattern validation** — flag invalid `contents:` paths | `textDocument/publishDiagnostics` |
+| **Slice collision detection** — warn when two packages claim the same concrete path; suppressed when the packages are in the same linear `prefer:` chain | `textDocument/publishDiagnostics` |
+| **`prefer:` validation** — flag `prefer:` on globs, self-references, cycles, and unknown packages | `textDocument/publishDiagnostics` |
+| **Lexical sort check** — warn when `contents:` paths or `essential:` entries are not in lexical order | `textDocument/publishDiagnostics` |
 | **Unknown reference warnings** — warn on `essential:` entries that don't exist | `textDocument/publishDiagnostics` |
 | **Package name check** — warn when `package:` value doesn't match the filename stem | `textDocument/publishDiagnostics` |
 | **Hover documentation** — show a slice's contents and essential dependencies | `textDocument/hover` |
@@ -117,14 +119,16 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
 - **Find references** (`Shift+F12` or equivalent) lists every `essential:` entry that names a given slice, across all files.
 - **Rename** (`F2`) renames a slice key in its definition file and updates every `essential:` reference across the release.
 - **Diagnostics** are published on open, change, and save:
-  - Invalid glob patterns in `contents:` paths.
-  - Cross-package path collisions (two packages claiming the same concrete path). Each diagnostic includes `relatedInformation` pointing to the conflicting file so editors can navigate there directly.
+  - Invalid `contents:` paths (must be absolute; `?`, `*`, `**` are the only wildcards).
+  - Cross-package path collisions (two packages claiming the same concrete path). Each diagnostic includes `relatedInformation` pointing to the conflicting file. Collisions are suppressed when the two packages are part of the same linear `prefer:` chain — directly (`B` prefers `A`) or transitively (`C→B→A` suppresses all three pairs). Fan-in is not suppressed: if both `B` and `C` prefer `A` independently, the `B`-`C` collision is still reported because they are not ordered relative to each other and conflict if installed without `A`.
+  - Invalid `prefer:` usage — `prefer:` on a glob path (error), `prefer:` naming the same package (error), a direct prefer cycle where both packages prefer each other on the same path (error), or `prefer:` naming a package that does not exist in the release (warning).
+  - Entries in `contents:` or `essential:` blocks that are not in lexical order (warning), with a *Sort entries lexically* quick fix.
   - Unknown or malformed slice references in `essential:` lists.
   - `package:` value that does not match the file's name stem (e.g. `openssl.yaml` must declare `package: openssl`).
   - Duplicate slice definitions — the same `pkg_slice` key declared in more than one file.
   - Missing copyright essential — a slice that doesn't reference `<pkg>_copyright` in its effective essentials (package-level or slice-level); the `copyright` slice itself is exempt.
   - Duplicate essential references — the same `pkg_slice` listed more than once in the same `essential:` block; diagnostics include `relatedInformation` pointing to the first occurrence.
-- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, a *Go to conflicting slice* action for path collisions, and *Add `<pkg>_copyright` to package essentials* for the missing-copyright diagnostic (inserts into the top-level `essential:` block, covering all slices at once; format matches the file's existing v1/v2 or v3 style).
+- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, a *Go to conflicting slice* action for path collisions, *Add `<pkg>_copyright` to package essentials* for the missing-copyright diagnostic (inserts into the top-level `essential:` block, covering all slices at once; format matches the file's existing v1/v2 or v3 style), and *Sort entries lexically* for out-of-order `contents:` or `essential:` blocks.
 - **Hover** renders a markdown summary of a slice's contents and its own essential dependencies.
 - **v3 format** (`essential:` as a YAML mapping with optional per-entry arch filters) is fully supported alongside the classic v1/v2 sequence format.
 
@@ -229,6 +233,7 @@ Settings can be provided either at the top level or nested under a
 
 - **Character offsets use byte lengths, not UTF-16 code units.** The LSP specification requires character positions to be expressed in UTF-16 code units by default. `chisel-releases-lsp` currently uses byte lengths (`len(token)`). For ASCII-only package and slice names this makes no difference, but names containing multi-byte UTF-8 characters would produce off-by-one position errors in some editors.
 - **`workspace/symbol` returns at most a few hundred items.** There is no pagination; for very large chisel-releases trees with hundreds of packages this could be slow. In practice canonical/chisel-releases has ~100 packages so this is not a problem today.
+- **`prefer:` cycle detection is limited to direct cycles.** A direct cycle (package A prefers B, package B prefers A on the same path) is detected and reported as an error. Longer transitive cycles (A→B→C→A) are not yet detected.
 
 ---
 
@@ -242,4 +247,4 @@ Settings can be provided either at the top level or nested under a
 - [x] Duplicate essential reference diagnostic + goto/remove actions
 - [x] Content path validation — validate using chisel's own rules (`?`, `*`, `**`; `[` and `]` are literal filename characters, not metacharacters)
 - [x] Lexical sort check — warn when `contents:` paths or `essential:` entries are not in lexical order, with a quick fix to sort them
-- [ ] `prefer`-aware collision detection — suppress collision warnings when an entry carries `prefer: <package>` pointing at the conflicting package; validate that `prefer` values are not used on globs, reference a different package, and name a package that exists in the release
+- [x] `prefer`-aware collision detection — suppress collision warnings when an entry carries `prefer: <package>` pointing at the conflicting package; validate that `prefer` values are not used on globs, reference a different package, and name a package that exists in the release

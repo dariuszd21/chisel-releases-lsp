@@ -783,3 +783,279 @@ slices:
 		t.Errorf("expected no diagnostics for sorted v3 essential, got: %v", diags)
 	}
 }
+
+// --- DetectCollisions prefer suppression ---
+
+func TestDetectCollisions_PreferSuppresses(t *testing.T) {
+	// One side carries prefer: pointing at the other — no collision expected.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+	})
+	if collisions := analysis.DetectCollisions(idx); len(collisions) != 0 {
+		t.Errorf("expected no collisions when prefer suppresses, got: %+v", collisions)
+	}
+}
+
+func TestDetectCollisions_MutualPrefer(t *testing.T) {
+	// Both sides prefer each other — the generic collision is still suppressed
+	// (DetectCollisions treats it as acknowledged). ValidatePrefer catches
+	// the contradiction as a separate Error diagnostic.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+	})
+	if collisions := analysis.DetectCollisions(idx); len(collisions) != 0 {
+		t.Errorf("expected no collisions with mutual prefer (ValidatePrefer handles it), got: %+v", collisions)
+	}
+}
+
+func TestDetectCollisions_PreferFanIn(t *testing.T) {
+	// B→A and C→A: both B and C defer to A's file when A is present.
+	// However, B and C are NOT in the same linear chain — they are not ordered
+	// relative to each other. Without A, B and C conflict on the path, so the
+	// B-C collision must still be reported.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+		"pkgc.yaml": `package: pkgc
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+	})
+	collisions := analysis.DetectCollisions(idx)
+	// B-A and C-A are suppressed by prefer; B-C is not.
+	if len(collisions) != 1 {
+		t.Errorf("expected 1 collision (B-C), got %d: %+v", len(collisions), collisions)
+	}
+}
+
+func TestDetectCollisions_PreferTransitiveSuppresses(t *testing.T) {
+	// Chain: C→B→A (C has prefer: B, B has prefer: A).
+	// All three claim the same path. A is last in the chain, so A's file is
+	// installed for all three. No collision should be reported for any pair.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+		"pkgc.yaml": `package: pkgc
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+	})
+	if collisions := analysis.DetectCollisions(idx); len(collisions) != 0 {
+		t.Errorf("expected no collisions for transitive prefer chain C→B→A, got: %+v", collisions)
+	}
+}
+
+func TestDetectCollisions_PreferWrongPackage(t *testing.T) {
+	// prefer points at a third package, not the actual conflicting one — collision must fire.
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgc}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path:
+`,
+	})
+	if collisions := analysis.DetectCollisions(idx); len(collisions) != 1 {
+		t.Errorf("expected 1 collision when prefer targets wrong package, got: %d", len(collisions))
+	}
+}
+
+// --- ValidatePrefer ---
+
+func TestValidatePrefer_OnGlob(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/a.so:
+`,
+	})
+	files := idx.AllFiles()
+	var pkgaFile string
+	for _, f := range files {
+		if idx.FileSliceFile(f).Package == "pkga" {
+			pkgaFile = f
+		}
+	}
+	sf := idx.FileSliceFile(pkgaFile)
+	diags := analysis.ValidatePrefer(pkgaFile, sf, idx)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for prefer on glob, got %d: %v", len(diags), diags)
+	}
+	if diags[0].Severity != analysis.SeverityError {
+		t.Errorf("expected Error severity, got %v", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, "glob") {
+		t.Errorf("message should mention glob, got: %q", diags[0].Message)
+	}
+}
+
+func TestValidatePrefer_SamePackage(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/a.so: {prefer: pkga}
+`,
+	})
+	files := idx.AllFiles()
+	sf := idx.FileSliceFile(files[0])
+	diags := analysis.ValidatePrefer(files[0], sf, idx)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for prefer == own package, got %d: %v", len(diags), diags)
+	}
+	if diags[0].Severity != analysis.SeverityError {
+		t.Errorf("expected Error severity, got %v", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, "pkga") {
+		t.Errorf("message should mention the package name, got: %q", diags[0].Message)
+	}
+}
+
+func TestValidatePrefer_UnknownPackage(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/a.so: {prefer: nonexistent}
+`,
+	})
+	files := idx.AllFiles()
+	sf := idx.FileSliceFile(files[0])
+	diags := analysis.ValidatePrefer(files[0], sf, idx)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for unknown prefer target, got %d: %v", len(diags), diags)
+	}
+	if diags[0].Severity != analysis.SeverityWarning {
+		t.Errorf("expected Warning severity, got %v", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, "nonexistent") {
+		t.Errorf("message should mention the unknown package, got: %q", diags[0].Message)
+	}
+}
+
+func TestValidatePrefer_MutualPrefer(t *testing.T) {
+	// Both packages prefer each other on the same path — this forms a cycle
+	// in the prefer chain, which is invalid (prefer must be a linear sequence).
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /shared/path: {prefer: pkga}
+`,
+	})
+	files := idx.AllFiles()
+	var pkgaFile string
+	for _, f := range files {
+		if idx.FileSliceFile(f).Package == "pkga" {
+			pkgaFile = f
+		}
+	}
+	sf := idx.FileSliceFile(pkgaFile)
+	diags := analysis.ValidatePrefer(pkgaFile, sf, idx)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 mutual-prefer diagnostic, got %d: %v", len(diags), diags)
+	}
+	if diags[0].Severity != analysis.SeverityError {
+		t.Errorf("expected Error severity, got %v", diags[0].Severity)
+	}
+	if !strings.Contains(diags[0].Message, "cycle") {
+		t.Errorf("message should mention cycle, got: %q", diags[0].Message)
+	}
+}
+
+func TestValidatePrefer_Valid(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/a.so: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/a.so:
+`,
+	})
+	files := idx.AllFiles()
+	var pkgaFile string
+	for _, f := range files {
+		if idx.FileSliceFile(f).Package == "pkga" {
+			pkgaFile = f
+		}
+	}
+	sf := idx.FileSliceFile(pkgaFile)
+	if diags := analysis.ValidatePrefer(pkgaFile, sf, idx); len(diags) != 0 {
+		t.Errorf("expected no diagnostics for valid prefer, got: %v", diags)
+	}
+}
