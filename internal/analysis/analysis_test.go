@@ -236,8 +236,8 @@ slices:
 	}
 }
 
-func TestDetectCollisions_GlobNotCollision(t *testing.T) {
-	// Glob paths must not trigger collision detection.
+func TestDetectCollisions_IdenticalGlobIsCollision(t *testing.T) {
+	// Two packages with the exact same glob pattern dispute every file it matches.
 	idx := setupCollisionIndex(t, map[string]string{
 		"pkga.yaml": `package: pkga
 slices:
@@ -254,8 +254,8 @@ slices:
 	})
 
 	collisions := analysis.DetectCollisions(idx)
-	if len(collisions) != 0 {
-		t.Errorf("expected no collisions for glob paths, got: %+v", collisions)
+	if len(collisions) != 1 {
+		t.Errorf("expected 1 collision for identical glob in two packages, got %d: %+v", len(collisions), collisions)
 	}
 }
 

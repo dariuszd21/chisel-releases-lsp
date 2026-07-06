@@ -103,8 +103,10 @@ type Collision struct {
 	RangeB parser.Range
 }
 
-// DetectCollisions finds all concrete (non-glob) paths that are claimed by
-// slices in two or more different packages with incompatible definitions.
+// DetectCollisions finds all paths — concrete or glob — that are claimed by
+// slices in two or more different packages. Identical glob patterns in
+// different packages are flagged just like identical exact paths: at install
+// time every file matching the pattern would be disputed between the packages.
 // A collision is suppressed when the two packages are connected in the same
 // prefer chain (directly or transitively).
 func DetectCollisions(idx *index.Index) []Collision {
@@ -125,9 +127,6 @@ func DetectCollisions(idx *index.Index) []Collision {
 		}
 		for sliceName, sd := range sf.Slices {
 			for _, ce := range sd.Contents {
-				if isGlob(ce.Path) {
-					continue
-				}
 				pathMap[ce.Path] = append(pathMap[ce.Path], entry{
 					pkg:       sf.Package,
 					sliceName: sliceName,
