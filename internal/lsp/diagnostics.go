@@ -173,6 +173,17 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		})
 	}
 
+	// 8. Lexical sort check.
+	for _, d := range analysis.CheckLexicalOrder(filePath, sf) {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.Range),
+			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
+			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeOutOfOrder),
+			Message:  d.Message,
+		})
+	}
+
 	return diags
 }
 

@@ -56,6 +56,7 @@ const (
 	DiagCodeDuplicateSlice      = "duplicate-slice"
 	DiagCodeMissingCopyright    = "missing-copyright-essential"
 	DiagCodeDuplicateEssential  = "duplicate-essential"
+	DiagCodeOutOfOrder          = "out-of-order"
 )
 
 // CmdGotoConflict is the workspace/executeCommand command name for navigating
