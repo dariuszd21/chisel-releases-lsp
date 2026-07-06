@@ -194,7 +194,7 @@ cmd/chisel-releases-lsp/   # Entry point
 internal/
   parser/                  # Position-aware YAML parser (gopkg.in/yaml.v3 Node API)
   index/                   # In-memory slice index + fsnotify watcher
-  analysis/                # Glob validation + collision detection
+  analysis/                # Content path validation + collision detection
   lsp/                     # LSP method handlers (glsp)
 ```
 
@@ -240,6 +240,6 @@ Settings can be provided either at the top level or nested under a
 - [x] Collision `relatedInformation` + `gotoConflict` code action
 - [x] Missing copyright essential diagnostic + quick fix
 - [x] Duplicate essential reference diagnostic + goto/remove actions
-- [ ] Content path validation — validate using chisel's own rules (`?`, `*`, `**`; no character classes `[...]`)
+- [x] Content path validation — validate using chisel's own rules (`?`, `*`, `**`; `[` and `]` are literal filename characters, not metacharacters)
 - [ ] Lexical sort check — warn when `contents:` paths or `essential:` entries are not in lexical order, with a quick fix to sort them
 - [ ] `prefer`-aware collision detection — suppress collision warnings when an entry carries `prefer: <package>` pointing at the conflicting package; validate that `prefer` values are not used on globs, reference a different package, and name a package that exists in the release
