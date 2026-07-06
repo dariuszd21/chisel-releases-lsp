@@ -165,6 +165,26 @@ func ExportCompletionPrefixAndRange(text string, line, char int) (string, protoc
 	return completionPrefixAndRange(text, line, char)
 }
 
+// ExportSortedBlockText exposes sortedBlockText for testing.
+func ExportSortedBlockText(lines []string, entries []SortableEntryForTest, blockEnd int) string {
+	se := make([]sortableEntry, len(entries))
+	for i, e := range entries {
+		se[i] = sortableEntry{key: e.Key, line: e.Line}
+	}
+	return sortedBlockText(lines, se, blockEnd)
+}
+
+// ExportFindBlockEnd exposes findBlockEnd for testing.
+func ExportFindBlockEnd(lines []string, lastEntryLine int) int {
+	return findBlockEnd(lines, lastEntryLine)
+}
+
+// SortableEntryForTest is the exported view of sortableEntry for use in tests.
+type SortableEntryForTest struct {
+	Key  string
+	Line int
+}
+
 // ExportComputeDiagnostics exposes computeDiagnostics for testing.
 func ExportComputeDiagnostics(s *Server, filePath string) []protocol.Diagnostic {
 	return s.computeDiagnostics(filePath)

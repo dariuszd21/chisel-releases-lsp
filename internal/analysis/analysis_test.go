@@ -748,3 +748,38 @@ slices:
 		t.Errorf("expected no diagnostics for fully sorted file, got: %v", diags)
 	}
 }
+
+func TestCheckLexicalOrder_V3EssentialOutOfOrder(t *testing.T) {
+	// v3 map-style essential: keys should be subject to the same lexical check.
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    essential:
+      zlib1g_libs:
+      libc6_libs: {arch: amd64}
+    contents:
+      /usr/bin/a:
+`)
+	diags := analysis.CheckLexicalOrder("p.yaml", sf)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for v3 out-of-order essential, got %d: %v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "libc6_libs") || !strings.Contains(diags[0].Message, "zlib1g_libs") {
+		t.Errorf("message should mention both refs, got: %q", diags[0].Message)
+	}
+}
+
+func TestCheckLexicalOrder_V3EssentialSorted(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    essential:
+      libc6_libs:
+      zlib1g_libs: {arch: amd64}
+    contents:
+      /usr/bin/a:
+`)
+	if diags := analysis.CheckLexicalOrder("p.yaml", sf); len(diags) != 0 {
+		t.Errorf("expected no diagnostics for sorted v3 essential, got: %v", diags)
+	}
+}
