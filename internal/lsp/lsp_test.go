@@ -3144,6 +3144,53 @@ slices:
 	}
 }
 
+func TestCodeAction_OutOfOrder_PackageLevelEssential(t *testing.T) {
+	content := `package: mypkg
+essential:
+  - zlib1g_libs
+  - libc6_libs
+slices:
+  libs:
+    contents:
+      /usr/lib/a.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var ooDiag protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeOutOfOrder {
+			ooDiag = d
+		}
+	}
+	if ooDiag.Message == "" {
+		t.Fatal("no out-of-order diagnostic found for package-level essential")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{ooDiag})
+	var sortAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Sort entries lexically" {
+			sortAction = &actions[i]
+		}
+	}
+	if sortAction == nil {
+		t.Fatal("expected sort action for out-of-order package-level essential, got none")
+	}
+
+	edits := sortAction.Edit.Changes[lsp.ExportFilePathToURI(filePath)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 text edit, got %d", len(edits))
+	}
+	got := edits[0].NewText
+	if strings.Index(got, "libc6_libs") > strings.Index(got, "zlib1g_libs") {
+		t.Errorf("libc6_libs should sort before zlib1g_libs, got: %q", got)
+	}
+}
+
 func TestCodeAction_OutOfOrder_Essential(t *testing.T) {
 	content := `package: mypkg
 slices:
