@@ -46,27 +46,43 @@ func (s *Server) computeCodeActions(
 	}
 	lines := strings.Split(doc, "\n")
 
-	// glsp's IntegerOrString.UnmarshalJSON uses a value receiver, so the
-	// diagnostic Code.Value is always nil after JSON deserialization. Re-compute
-	// diagnostics server-side to build a reliable line→code map and use that
-	// instead of the (broken) client-reflected codes.
-	lineCode := make(map[uint32]string)
-	for _, d := range s.computeDiagnostics(filePath) {
-		if d.Code != nil {
-			if c, ok := d.Code.Value.(string); ok {
-				lineCode[d.Range.Start.Line] = c
+	// Use the cached line→code map from the most recent computeDiagnostics run.
+	// This avoids re-running all diagnostic checks (including expensive cross-file
+	// passes like DetectGlobCollisions) on every code-action request.
+	s.diagCacheMu.RLock()
+	lineCode := s.diagLineCode[filePath]
+	s.diagCacheMu.RUnlock()
+	if lineCode == nil {
+		// Cache miss (e.g. code action before first diagnostic run): fall back.
+		lineCode = make(map[uint32]string)
+		for _, d := range s.computeDiagnostics(filePath) {
+			if d.Code != nil {
+				if c, ok := d.Code.Value.(string); ok {
+					lineCode[d.Range.Start.Line] = c
+				}
 			}
 		}
 	}
 
 	var actions []protocol.CodeAction
 
-	// Pre-compute collision results once so individual case handlers can scan
-	// them without re-running the full detection per diagnostic.
+	// Pre-compute collision results only when the request actually contains
+	// collision diagnostics — these are the only cases that need them.
+	needsExact, needsGlob := false, false
+	for _, diag := range clientDiags {
+		switch lineCode[diag.Range.Start.Line] {
+		case DiagCodeSliceCollision:
+			needsExact = true
+		case DiagCodeGlobCollision:
+			needsGlob = true
+		}
+	}
 	var exactCollisions []analysis.Collision
 	var globCollisions []analysis.GlobCollision
-	if s.idx != nil {
+	if s.idx != nil && needsExact {
 		exactCollisions = analysis.DetectCollisions(s.idx)
+	}
+	if s.idx != nil && needsGlob {
 		globCollisions = analysis.DetectGlobCollisions(s.idx)
 	}
 

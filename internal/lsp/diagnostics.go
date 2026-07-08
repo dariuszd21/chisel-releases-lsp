@@ -236,6 +236,20 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		})
 	}
 
+	// Cache the line→code map so computeCodeActions can look up diagnostic codes
+	// without re-running all checks.
+	lineCode := make(map[uint32]string, len(diags))
+	for _, d := range diags {
+		if d.Code != nil {
+			if c, ok := d.Code.Value.(string); ok {
+				lineCode[d.Range.Start.Line] = c
+			}
+		}
+	}
+	s.diagCacheMu.Lock()
+	s.diagLineCode[filePath] = lineCode
+	s.diagCacheMu.Unlock()
+
 	return diags
 }
 
