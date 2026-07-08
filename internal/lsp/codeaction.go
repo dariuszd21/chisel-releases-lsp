@@ -60,6 +60,16 @@ func (s *Server) computeCodeActions(
 	}
 
 	var actions []protocol.CodeAction
+
+	// Pre-compute collision results once so individual case handlers can scan
+	// them without re-running the full detection per diagnostic.
+	var exactCollisions []analysis.Collision
+	var globCollisions []analysis.GlobCollision
+	if s.idx != nil {
+		exactCollisions = analysis.DetectCollisions(s.idx)
+		globCollisions = analysis.DetectGlobCollisions(s.idx)
+	}
+
 	for _, diag := range clientDiags {
 		// Resolve code: prefer freshly-computed server value; fall back to
 		// whatever the client sent (works if the client fixed the round-trip).
@@ -115,7 +125,7 @@ func (s *Server) computeCodeActions(
 				continue
 			}
 			lineNum := diag.Range.Start.Line
-			for _, col := range analysis.DetectCollisions(s.idx) {
+			for _, col := range exactCollisions {
 				var otherURI string
 				var otherLine, otherChar uint32
 				if col.FileA == filePath && col.RangeA.Start.Line == int(lineNum) {
@@ -211,7 +221,7 @@ func (s *Server) computeCodeActions(
 				continue
 			}
 			lineNum := diag.Range.Start.Line
-			for _, col := range analysis.DetectGlobCollisions(s.idx) {
+			for _, col := range globCollisions {
 				var otherURI string
 				var otherLine, otherChar uint32
 				if col.GlobFile == filePath && col.GlobRange.Start.Line == int(lineNum) {
