@@ -46,20 +46,46 @@ func (s *Server) computeCodeActions(
 	}
 	lines := strings.Split(doc, "\n")
 
-	// glsp's IntegerOrString.UnmarshalJSON uses a value receiver, so the
-	// diagnostic Code.Value is always nil after JSON deserialization. Re-compute
-	// diagnostics server-side to build a reliable line→code map and use that
-	// instead of the (broken) client-reflected codes.
-	lineCode := make(map[uint32]string)
-	for _, d := range s.computeDiagnostics(filePath) {
-		if d.Code != nil {
-			if c, ok := d.Code.Value.(string); ok {
-				lineCode[d.Range.Start.Line] = c
+	// Use the cached line→code map from the most recent computeDiagnostics run.
+	// This avoids re-running all diagnostic checks (including expensive cross-file
+	// passes like DetectGlobCollisions) on every code-action request.
+	s.diagCacheMu.RLock()
+	lineCode := s.diagLineCode[filePath]
+	s.diagCacheMu.RUnlock()
+	if lineCode == nil {
+		// Cache miss (e.g. code action before first diagnostic run): fall back.
+		lineCode = make(map[uint32]string)
+		for _, d := range s.computeDiagnostics(filePath) {
+			if d.Code != nil {
+				if c, ok := d.Code.Value.(string); ok {
+					lineCode[d.Range.Start.Line] = c
+				}
 			}
 		}
 	}
 
 	var actions []protocol.CodeAction
+
+	// Pre-compute collision results only when the request actually contains
+	// collision diagnostics — these are the only cases that need them.
+	needsExact, needsGlob := false, false
+	for _, diag := range clientDiags {
+		switch lineCode[diag.Range.Start.Line] {
+		case DiagCodeSliceCollision:
+			needsExact = true
+		case DiagCodeGlobCollision:
+			needsGlob = true
+		}
+	}
+	var exactCollisions []analysis.Collision
+	var globCollisions []analysis.GlobCollision
+	if s.idx != nil && needsExact {
+		exactCollisions = analysis.DetectCollisions(s.idx)
+	}
+	if s.idx != nil && needsGlob {
+		globCollisions = analysis.DetectGlobCollisions(s.idx)
+	}
+
 	for _, diag := range clientDiags {
 		// Resolve code: prefer freshly-computed server value; fall back to
 		// whatever the client sent (works if the client fixed the round-trip).
@@ -115,7 +141,7 @@ func (s *Server) computeCodeActions(
 				continue
 			}
 			lineNum := diag.Range.Start.Line
-			for _, col := range analysis.DetectCollisions(s.idx) {
+			for _, col := range exactCollisions {
 				var otherURI string
 				var otherLine, otherChar uint32
 				if col.FileA == filePath && col.RangeA.Start.Line == int(lineNum) {
@@ -206,6 +232,58 @@ func (s *Server) computeCodeActions(
 					},
 				},
 			})
+		case DiagCodeGlobCollision:
+			if s.idx == nil {
+				continue
+			}
+			lineNum := diag.Range.Start.Line
+			for _, col := range globCollisions {
+				var otherURI string
+				var otherLine, otherChar uint32
+				if col.GlobFile == filePath && col.GlobRange.Start.Line == int(lineNum) {
+					otherURI = string(filePathToURI(col.ExactFile))
+					otherLine = uint32(col.ExactRange.Start.Line)
+					otherChar = uint32(col.ExactRange.Start.Character)
+				} else if col.ExactFile == filePath && col.ExactRange.Start.Line == int(lineNum) {
+					otherURI = string(filePathToURI(col.GlobFile))
+					otherLine = uint32(col.GlobRange.Start.Line)
+					otherChar = uint32(col.GlobRange.Start.Character)
+				}
+				if otherURI == "" {
+					continue
+				}
+				actionKind := protocol.CodeActionKindEmpty
+				actions = append(actions, protocol.CodeAction{
+					Title:       fmt.Sprintf("Go to conflicting slice in %s", filepath.Base(col.GlobFile)),
+					Kind:        &actionKind,
+					Diagnostics: []protocol.Diagnostic{diag},
+					Command: &protocol.Command{
+						Title:     "Go to conflicting slice",
+						Command:   CmdGotoConflict,
+						Arguments: []any{otherURI, float64(otherLine), float64(otherChar)},
+					},
+				})
+				break
+			}
+
+		case DiagCodeRedundantPath:
+			lineNum := int(diag.Range.Start.Line)
+			if !isYAMLMapKeyLine(lines, lineNum) {
+				continue
+			}
+			editRange := fullLineDeleteRange(lines, lineNum)
+			actions = append(actions, protocol.CodeAction{
+				Title:       "Remove redundant path",
+				Kind:        &quickFix,
+				Diagnostics: []protocol.Diagnostic{diag},
+				IsPreferred: &trueVal,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+						uri: {{Range: editRange, NewText: ""}},
+					},
+				},
+			})
+
 		case DiagCodeOutOfOrder:
 			if s.idx == nil {
 				continue

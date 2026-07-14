@@ -19,6 +19,8 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 | **Workspace symbols** — search all `pkg_slice` names across the release | `workspace/symbol` |
 | **Glob pattern validation** — flag invalid `contents:` paths | `textDocument/publishDiagnostics` |
 | **Slice collision detection** — warn when two packages claim the same concrete path; suppressed when the packages are in the same linear `prefer:` chain | `textDocument/publishDiagnostics` |
+| **Glob collision detection** — warn when a glob pattern in one package matches a concrete path declared in another | `textDocument/publishDiagnostics` |
+| **Redundant path detection** — warn when an exact path in a slice is already covered by a glob in the same slice | `textDocument/publishDiagnostics` |
 | **`prefer:` validation** — flag `prefer:` on globs, self-references, cycles, and unknown packages | `textDocument/publishDiagnostics` |
 | **Lexical sort check** — warn when `contents:` paths or `essential:` entries are not in lexical order | `textDocument/publishDiagnostics` |
 | **Unknown reference warnings** — warn on `essential:` entries that don't exist | `textDocument/publishDiagnostics` |
@@ -121,6 +123,8 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
 - **Diagnostics** are published on open, change, and save:
   - Invalid `contents:` paths (must be absolute; `?`, `*`, `**` are the only wildcards).
   - Cross-package path collisions (two packages claiming the same concrete path). Each diagnostic includes `relatedInformation` pointing to the conflicting file. Collisions are suppressed when the two packages are part of the same linear `prefer:` chain — directly (`B` prefers `A`) or transitively (`C→B→A` suppresses all three pairs). Fan-in is not suppressed: if both `B` and `C` prefer `A` independently, the `B`-`C` collision is still reported because they are not ordered relative to each other and conflict if installed without `A`.
+  - Glob-exact cross-package collisions: a glob pattern in one package that matches a concrete path declared in another. Both the glob and the exact-path side receive a diagnostic with `relatedInformation` pointing to the other file. Prefer-chain suppression applies. `*` patterns are checked only within the same directory; `**` patterns are checked across directories.
+  - Redundant exact paths: an exact path in a `contents:` block that is already covered by a glob in the same slice and carries no special attributes (`mode`, `text`, `copy`, …). A *Remove redundant path* quick fix is offered.
   - Invalid `prefer:` usage — `prefer:` on a glob path (error), `prefer:` naming the same package (error), a direct prefer cycle where both packages prefer each other on the same path (error), or `prefer:` naming a package that does not exist in the release (warning).
   - Entries in `contents:` or `essential:` blocks that are not in lexical order (warning), with a *Sort entries lexically* quick fix.
   - Unknown or malformed slice references in `essential:` lists.

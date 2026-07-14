@@ -236,8 +236,8 @@ slices:
 	}
 }
 
-func TestDetectCollisions_GlobNotCollision(t *testing.T) {
-	// Glob paths must not trigger collision detection.
+func TestDetectCollisions_IdenticalGlobIsCollision(t *testing.T) {
+	// Two packages with the exact same glob pattern dispute every file it matches.
 	idx := setupCollisionIndex(t, map[string]string{
 		"pkga.yaml": `package: pkga
 slices:
@@ -254,8 +254,8 @@ slices:
 	})
 
 	collisions := analysis.DetectCollisions(idx)
-	if len(collisions) != 0 {
-		t.Errorf("expected no collisions for glob paths, got: %+v", collisions)
+	if len(collisions) != 1 {
+		t.Errorf("expected 1 collision for identical glob in two packages, got %d: %+v", len(collisions), collisions)
 	}
 }
 
@@ -1057,5 +1057,209 @@ slices:
 	sf := idx.FileSliceFile(pkgaFile)
 	if diags := analysis.ValidatePrefer(pkgaFile, sf, idx); len(diags) != 0 {
 		t.Errorf("expected no diagnostics for valid prefer, got: %v", diags)
+	}
+}
+
+// --- globMatchesPath ---
+
+func TestGlobMatchesPath(t *testing.T) {
+	cases := []struct {
+		glob string
+		path string
+		want bool
+	}{
+		// * does not cross /
+		{"/usr/lib/*.so", "/usr/lib/libssl.so", true},
+		{"/usr/lib/*.so", "/usr/lib/libssl.so.3", false},
+		{"/usr/lib/*.so", "/usr/lib/sub/libssl.so", false},
+		// ? matches one char (not /)
+		{"/usr/bin/?", "/usr/bin/[", true},
+		{"/usr/bin/?", "/usr/bin/ab", false},
+		// ** crosses /
+		{"/usr/lib/**", "/usr/lib/libssl.so", true},
+		{"/usr/lib/**", "/usr/lib/sub/dir/libssl.so", true},
+		{"/usr/share/**/README", "/usr/share/doc/openssl/README", true},
+		{"/usr/share/**/README", "/usr/share/README", true},
+		{"/usr/share/**/README", "/usr/share/doc/NOTREADME", false},
+		// ** in mixed segment
+		{"/usr/lib/**.so", "/usr/lib/libssl.so", true},
+		{"/usr/lib/**.so", "/usr/lib/sub/libssl.so", true},
+		{"/usr/lib/**.so", "/usr/lib/sub/libssl.so.3", false},
+		// exact (no wildcards)
+		{"/usr/bin/foo", "/usr/bin/foo", true},
+		{"/usr/bin/foo", "/usr/bin/bar", false},
+	}
+	for _, c := range cases {
+		got := analysis.GlobMatchesPath(c.glob, c.path)
+		if got != c.want {
+			t.Errorf("globMatchesPath(%q, %q) = %v, want %v", c.glob, c.path, got, c.want)
+		}
+	}
+}
+
+// --- DetectGlobCollisions ---
+
+func TestDetectGlobCollisions_BasicMatch(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/libssl.so:
+`,
+	})
+	cols := analysis.DetectGlobCollisions(idx)
+	if len(cols) != 1 {
+		t.Fatalf("expected 1 glob collision, got %d: %+v", len(cols), cols)
+	}
+	if cols[0].ExactPath != "/usr/lib/libssl.so" {
+		t.Errorf("ExactPath: %q", cols[0].ExactPath)
+	}
+}
+
+func TestDetectGlobCollisions_NoMatchDifferentDir(t *testing.T) {
+	// * does not cross /
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/sub/libssl.so:
+`,
+	})
+	if cols := analysis.DetectGlobCollisions(idx); len(cols) != 0 {
+		t.Errorf("expected no collision (* does not cross /), got: %+v", cols)
+	}
+}
+
+func TestDetectGlobCollisions_DoubleStarCrossesDir(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/**:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/sub/libssl.so:
+`,
+	})
+	if cols := analysis.DetectGlobCollisions(idx); len(cols) != 1 {
+		t.Errorf("expected 1 collision (** crosses /), got %d: %+v", len(cols), cols)
+	}
+}
+
+func TestDetectGlobCollisions_SamePackageSkipped(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so:
+      /usr/lib/libssl.so:
+`,
+	})
+	if cols := analysis.DetectGlobCollisions(idx); len(cols) != 0 {
+		t.Errorf("expected no cross-package collision for same package, got: %+v", cols)
+	}
+}
+
+func TestDetectGlobCollisions_PreferSuppresses(t *testing.T) {
+	idx := setupCollisionIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so: {prefer: pkgb}
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/libssl.so:
+`,
+	})
+	if cols := analysis.DetectGlobCollisions(idx); len(cols) != 0 {
+		t.Errorf("expected no collision when prefer suppresses, got: %+v", cols)
+	}
+}
+
+// --- CheckRedundantPaths ---
+
+func TestCheckRedundantPaths_Detected(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    contents:
+      /usr/lib/*.so:
+      /usr/lib/libssl.so:
+`)
+	diags := analysis.CheckRedundantPaths("p.yaml", sf)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "/usr/lib/libssl.so") {
+		t.Errorf("message should mention redundant path, got: %q", diags[0].Message)
+	}
+	if diags[0].Severity != analysis.SeverityWarning {
+		t.Errorf("expected Warning, got %v", diags[0].Severity)
+	}
+}
+
+func TestCheckRedundantPaths_AttributesNotRedundant(t *testing.T) {
+	// Exact path has attributes — NOT redundant even though glob covers it.
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    contents:
+      /usr/lib/*.so:
+      /usr/lib/libssl.so: {mode: 0755}
+`)
+	if diags := analysis.CheckRedundantPaths("p.yaml", sf); len(diags) != 0 {
+		t.Errorf("entry with attributes should not be flagged as redundant, got: %v", diags)
+	}
+}
+
+func TestCheckRedundantPaths_NoGlobs(t *testing.T) {
+	sf := mustParseYAML(t, `package: p
+slices:
+  s:
+    contents:
+      /usr/lib/libssl.so:
+      /usr/lib/libcrypto.so:
+`)
+	if diags := analysis.CheckRedundantPaths("p.yaml", sf); len(diags) != 0 {
+		t.Errorf("no globs means no redundant paths, got: %v", diags)
+	}
+}
+
+func TestCheckRedundantPaths_DifferentSliceNotRedundant(t *testing.T) {
+	// Glob and exact are in different slices — not redundant.
+	sf := mustParseYAML(t, `package: p
+slices:
+  libs:
+    contents:
+      /usr/lib/*.so:
+  specific:
+    contents:
+      /usr/lib/libssl.so:
+`)
+	if diags := analysis.CheckRedundantPaths("p.yaml", sf); len(diags) != 0 {
+		t.Errorf("cross-slice should not be flagged, got: %v", diags)
 	}
 }

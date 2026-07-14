@@ -310,11 +310,17 @@ slices:
 	if contents[0].Prefer != "openssl" {
 		t.Errorf("expected Prefer=openssl, got %q", contents[0].Prefer)
 	}
+	if !contents[0].HasAttributes {
+		t.Error("expected HasAttributes=true for entry with prefer:")
+	}
 	if contents[0].PreferRange.Start.Line == 0 && contents[0].PreferRange.End.Line == 0 {
 		t.Error("PreferRange should be non-zero for inline prefer")
 	}
 	if contents[1].Prefer != "" {
 		t.Errorf("expected empty Prefer for entry without prefer, got %q", contents[1].Prefer)
+	}
+	if contents[1].HasAttributes {
+		t.Error("expected HasAttributes=false for plain entry")
 	}
 }
 

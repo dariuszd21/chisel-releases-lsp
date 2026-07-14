@@ -3570,3 +3570,116 @@ slices:
 		t.Error("expected invalid-prefer diagnostic for prefer cycle, got none")
 	}
 }
+
+func TestComputeDiagnostics_GlobCollision(t *testing.T) {
+	idx, slicesDir := setupLSPIndex(t, map[string]string{
+		"pkga.yaml": `package: pkga
+slices:
+  s:
+    contents:
+      /usr/lib/*.so:
+`,
+		"pkgb.yaml": `package: pkgb
+slices:
+  s:
+    contents:
+      /usr/lib/libssl.so:
+`,
+	})
+	srv := lsp.NewWithIndex(idx)
+	pkgaPath := filepath.Join(slicesDir, "pkga.yaml")
+
+	found := false
+	for _, d := range srv.ExportComputeDiagnostics(pkgaPath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeGlobCollision {
+			found = true
+			if !strings.Contains(d.Message, "/usr/lib/libssl.so") {
+				t.Errorf("message should mention exact path, got: %q", d.Message)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected glob-collision diagnostic on glob side, got none")
+	}
+
+	// Exact side also gets a diagnostic.
+	pkgbPath := filepath.Join(slicesDir, "pkgb.yaml")
+	found = false
+	for _, d := range srv.ExportComputeDiagnostics(pkgbPath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeGlobCollision {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected glob-collision diagnostic on exact side, got none")
+	}
+}
+
+func TestComputeDiagnostics_RedundantPath(t *testing.T) {
+	content := `package: mypkg
+slices:
+  libs:
+    contents:
+      /usr/lib/*.so:
+      /usr/lib/libssl.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+
+	found := false
+	for _, d := range srv.ExportComputeDiagnostics(filePath) {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeRedundantPath {
+			found = true
+			if !strings.Contains(d.Message, "/usr/lib/libssl.so") {
+				t.Errorf("message should mention redundant path, got: %q", d.Message)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected redundant-path diagnostic, got none")
+	}
+}
+
+func TestCodeAction_RedundantPath_RemoveFix(t *testing.T) {
+	content := `package: mypkg
+slices:
+  libs:
+    contents:
+      /usr/lib/*.so:
+      /usr/lib/libssl.so:
+`
+	idx, slicesDir := setupLSPIndex(t, map[string]string{"mypkg.yaml": content})
+	srv := lsp.NewWithIndex(idx)
+	filePath := filepath.Join(slicesDir, "mypkg.yaml")
+	srv.SetDocForTest(filePath, content)
+
+	diags := srv.ExportComputeDiagnostics(filePath)
+	var redDiag protocol.Diagnostic
+	for _, d := range diags {
+		if d.Code != nil && d.Code.Value == lsp.DiagCodeRedundantPath {
+			redDiag = d
+		}
+	}
+	if redDiag.Message == "" {
+		t.Fatal("no redundant-path diagnostic found")
+	}
+
+	actions := srv.ExportCodeAction(filePath, []protocol.Diagnostic{redDiag})
+	var removeAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Remove redundant path" {
+			removeAction = &actions[i]
+		}
+	}
+	if removeAction == nil {
+		t.Fatal("expected 'Remove redundant path' code action, got none")
+	}
+	edits := removeAction.Edit.Changes[lsp.ExportFilePathToURI(filePath)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 text edit, got %d", len(edits))
+	}
+	if edits[0].NewText != "" {
+		t.Errorf("expected deletion (empty NewText), got %q", edits[0].NewText)
+	}
+}

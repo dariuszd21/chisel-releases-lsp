@@ -45,6 +45,12 @@ type Server struct {
 	docMu sync.RWMutex
 	docs  map[string]string
 
+	// diagCacheMu guards diagLineCode, which caches the line→diagCode map
+	// produced by the most recent computeDiagnostics run for each file.
+	// computeCodeActions reads this cache instead of re-running all diagnostics.
+	diagCacheMu  sync.RWMutex
+	diagLineCode map[string]map[uint32]string
+
 	// notifyMu guards notifier; notifier is set from the first request context and
 	// used by background goroutines that must send LSP notifications without a
 	// request-scoped context.
@@ -59,8 +65,9 @@ type Server struct {
 // New creates a Server.
 func New() *Server {
 	s := &Server{
-		docs:   make(map[string]string),
-		config: defaultConfig(),
+		docs:         make(map[string]string),
+		diagLineCode: make(map[string]map[uint32]string),
+		config:       defaultConfig(),
 	}
 	s.handler = protocol.Handler{
 		Initialize:                      s.initialize,
