@@ -125,10 +125,11 @@ func DetectCollisions(idx *index.Index) []Collision {
 		if sf == nil {
 			continue
 		}
+		pkgName := idx.PackageName(filePath)
 		for sliceName, sd := range sf.Slices {
 			for _, ce := range sd.Contents {
 				pathMap[ce.Path] = append(pathMap[ce.Path], entry{
-					pkg:       sf.Package,
+					pkg:       pkgName,
 					sliceName: sliceName,
 					file:      filePath,
 					r:         ce.PathRange,
@@ -246,10 +247,11 @@ func DetectGlobCollisions(idx *index.Index) []GlobCollision {
 		if sf == nil || sf.Package == "" {
 			continue
 		}
+		pkgName := idx.PackageName(filePath)
 		for sliceName, sd := range sf.Slices {
 			for _, ce := range sd.Contents {
 				e := entry{
-					pkg:       sf.Package,
+					pkg:       pkgName,
 					sliceName: sliceName,
 					file:      filePath,
 					r:         ce.PathRange,
@@ -431,6 +433,12 @@ func globStaticPrefix(glob string) string {
 // Note: transitive cycle detection (A→B→C→A) is not yet implemented.
 func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []Diagnostic {
 	var diags []Diagnostic
+	// Prefer values name unique package names, which for store-backed packages
+	// carry the store's default-prefix.
+	pkgName := idx.PackageName(filePath)
+	if pkgName == "" {
+		pkgName = sf.Package
+	}
 	for _, name := range sf.SliceOrder {
 		for _, ce := range sf.Slices[name].Contents {
 			if ce.Prefer == "" {
@@ -445,7 +453,7 @@ func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []D
 				})
 				continue
 			}
-			if ce.Prefer == sf.Package {
+			if ce.Prefer == pkgName {
 				diags = append(diags, Diagnostic{
 					File:  filePath,
 					Range: ce.PreferRange,
@@ -457,13 +465,13 @@ func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []D
 				})
 				continue
 			}
-			if isMutualPrefer(ce.Path, sf.Package, ce.Prefer, idx) {
+			if isMutualPrefer(ce.Path, pkgName, ce.Prefer, idx) {
 				diags = append(diags, Diagnostic{
 					File:  filePath,
 					Range: ce.PreferRange,
 					Message: fmt.Sprintf(
 						"prefer: cycle detected — %q also declares prefer: %q on %q; prefer must form a linear chain",
-						ce.Prefer, sf.Package, ce.Path,
+						ce.Prefer, pkgName, ce.Path,
 					),
 					Severity: SeverityError,
 				})
@@ -495,7 +503,7 @@ func ValidatePrefer(filePath string, sf *parser.SliceFile, idx *index.Index) []D
 func isMutualPrefer(path, thisPackage, preferTarget string, idx *index.Index) bool {
 	for _, otherFile := range idx.AllFiles() {
 		otherSf := idx.FileSliceFile(otherFile)
-		if otherSf == nil || otherSf.Package != preferTarget {
+		if otherSf == nil || idx.PackageName(otherFile) != preferTarget {
 			continue
 		}
 		for _, sd := range otherSf.Slices {
@@ -518,11 +526,17 @@ func isGlob(p string) bool {
 // CheckCopyrightEssential returns a Warning diagnostic for every slice that does
 // not reference <pkg>_copyright in its effective essentials (package-level or
 // slice-level). The copyright slice itself is exempt.
-func CheckCopyrightEssential(filePath string, sf *parser.SliceFile) []Diagnostic {
-	if sf.Package == "" {
+//
+// pkgName is the unique package name, which for store-backed packages carries
+// the store's default-prefix; pass "" to derive it from the `package:` value.
+func CheckCopyrightEssential(filePath string, sf *parser.SliceFile, pkgName string) []Diagnostic {
+	if pkgName == "" {
+		pkgName = sf.Package
+	}
+	if pkgName == "" {
 		return nil
 	}
-	target := sf.Package + "_copyright"
+	target := pkgName + "_copyright"
 
 	// If the package-level essential already includes the copyright ref,
 	// all slices inherit it — nothing to warn about.
@@ -588,12 +602,13 @@ func DetectDuplicateSlices(idx *index.Index) []DuplicateSlice {
 		if sf == nil || sf.Package == "" {
 			continue
 		}
+		pkgName := idx.PackageName(filePath)
 		for _, sliceName := range sf.SliceOrder {
 			sd := sf.Slices[sliceName]
-			key := sf.Package + ":" + sliceName
+			key := pkgName + ":" + sliceName
 			if prev, exists := seen[key]; exists {
 				dups = append(dups, DuplicateSlice{
-					Pkg:       sf.Package,
+					Pkg:       pkgName,
 					SliceName: sliceName,
 					File1:     prev.file,
 					Range1:    prev.rng,

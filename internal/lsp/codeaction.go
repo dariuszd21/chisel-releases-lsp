@@ -215,7 +215,12 @@ func (s *Server) computeCodeActions(
 			if sf == nil {
 				continue
 			}
-			pkg := sf.Package
+			// Use the unique package name so store-backed packages get the
+			// prefixed reference (e.g. "bin-curl_copyright").
+			pkg := s.idx.PackageName(filePath)
+			if pkg == "" {
+				pkg = sf.Package
+			}
 			copyrightRef := pkg + "_copyright"
 			edit, ok := insertTopLevelCopyrightEdit(lines, pkg)
 			if !ok {
@@ -284,6 +289,22 @@ func (s *Server) computeCodeActions(
 				},
 			})
 
+		case DiagCodeInvalidChannel:
+			// Offer a corrected pattern for each known risk when the risk part
+			// of the channel is what is wrong.
+			for _, fixed := range channelRiskFixes(lines, diag.Range) {
+				actions = append(actions, protocol.CodeAction{
+					Title:       fmt.Sprintf("Change channel to %q", fixed),
+					Kind:        &quickFix,
+					Diagnostics: []protocol.Diagnostic{diag},
+					Edit: &protocol.WorkspaceEdit{
+						Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+							uri: {{Range: diag.Range, NewText: fixed}},
+						},
+					},
+				})
+			}
+
 		case DiagCodeOutOfOrder:
 			if s.idx == nil {
 				continue
@@ -318,6 +339,31 @@ func (s *Server) computeCodeActions(
 		}
 	}
 	return actions
+}
+
+// channelRiskFixes returns corrected "<track>/<risk>" values for an invalid
+// channel pattern, one per known risk. It returns nil when the text at r does
+// not carry a track, in which case there is nothing to keep and no useful fix
+// to offer.
+func channelRiskFixes(lines []string, r protocol.Range) []string {
+	line := int(r.Start.Line)
+	if line < 0 || line >= len(lines) || r.Start.Line != r.End.Line {
+		return nil
+	}
+	l := lines[line]
+	start, end := int(r.Start.Character), int(r.End.Character)
+	if start < 0 || end > len(l) || start >= end {
+		return nil
+	}
+	track, _, ok := strings.Cut(l[start:end], "/")
+	if !ok || track == "" || strings.ContainsAny(track, "*!,") {
+		return nil
+	}
+	fixes := make([]string, 0, len(analysis.KnownRisks))
+	for _, risk := range analysis.KnownRisks {
+		fixes = append(fixes, track+"/"+risk)
+	}
+	return fixes
 }
 
 // detectEssentialFormat scans lines for an essential: block and returns "v3"

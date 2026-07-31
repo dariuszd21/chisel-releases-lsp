@@ -60,6 +60,9 @@ const (
 	DiagCodeInvalidPrefer       = "invalid-prefer"
 	DiagCodeGlobCollision       = "glob-collision"
 	DiagCodeRedundantPath       = "redundant-path"
+	DiagCodeInvalidStore        = "invalid-store"
+	DiagCodeInvalidChannel      = "invalid-channel"
+	DiagCodeInvalidRelease      = "invalid-release"
 )
 
 // CmdGotoConflict is the workspace/executeCommand command name for navigating

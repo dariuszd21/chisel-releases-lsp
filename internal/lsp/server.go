@@ -119,7 +119,8 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 		// Store the notifier from this ctx before spawning the index so that
 		// background callbacks never capture a stale request-scoped context.
 		s.storeNotifier(ctx)
-		idx, idxErr := index.New(root,
+		idx, idxErr := index.New(
+			root,
 			func(filePath string) { s.publishDiagnosticsBackground(filePath) },
 			func(filePath string) { s.clearDiagnosticsBackground(filePath) },
 		)
@@ -224,6 +225,12 @@ func (s *Server) textDocumentDidSave(ctx *glsp.Context, params *protocol.DidSave
 		s.setDoc(filePath, *params.Text)
 		s.reindexAndPublish(n, filePath, []byte(*params.Text))
 	} else if s.idx != nil {
+		if s.idx.IsReleaseFile(filePath) {
+			s.idx.ReloadRelease()
+			s.publishDiagnosticsForFile(n, filePath)
+			s.republishOpenFiles(n, filePath)
+			return nil
+		}
 		if idxErr := s.idx.IndexFile(filePath); idxErr != nil {
 			publishDiagnostics(n, filePathToURI(filePath), []protocol.Diagnostic{
 				{
@@ -244,6 +251,13 @@ func (s *Server) reindexAndPublish(n Notifier, filePath string, content []byte) 
 	if s.idx == nil {
 		return
 	}
+	// The release definition drives the format version and the store prefixes,
+	// both of which change how every slice file is interpreted. Re-read it and
+	// re-index everything rather than treating it as a slice file.
+	if s.idx.IsReleaseFile(filePath) {
+		s.reloadReleaseAndPublish(n, filePath, content)
+		return
+	}
 	sf, err := parser.ParseBytes(content)
 	if err != nil {
 		publishDiagnostics(n, filePathToURI(filePath), []protocol.Diagnostic{
@@ -260,6 +274,25 @@ func (s *Server) reindexAndPublish(n Notifier, filePath string, content []byte) 
 	s.publishDiagnosticsForFile(n, filePath)
 	// Republish all other open files: cross-file analysis (collision detection)
 	// may produce different results for them after this file was updated.
+	s.republishOpenFiles(n, filePath)
+}
+
+// reloadReleaseAndPublish re-reads the release definition from the editor's
+// buffer and republishes diagnostics for every open document, since the format
+// version and the store prefixes affect the interpretation of every slice file.
+func (s *Server) reloadReleaseAndPublish(n Notifier, filePath string, content []byte) {
+	if err := s.idx.UpdateRelease(content); err != nil {
+		publishDiagnostics(n, filePathToURI(filePath), []protocol.Diagnostic{
+			{
+				Range:    protocol.Range{},
+				Severity: severityPtr(protocol.DiagnosticSeverityError),
+				Source:   strPtr("chisel-releases-lsp"),
+				Message:  "YAML parse error: " + err.Error(),
+			},
+		})
+		return
+	}
+	s.publishDiagnosticsForFile(n, filePath)
 	s.republishOpenFiles(n, filePath)
 }
 
@@ -294,6 +327,12 @@ func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidClo
 
 	// Revert to on-disk state so cross-file analysis reflects saved content,
 	// not the unsaved in-memory buffer that was open in the editor.
+	if s.idx.IsReleaseFile(filePath) {
+		s.idx.ReloadRelease()
+		s.publishDiagnosticsForFile(n, filePath)
+		s.republishOpenFiles(n, filePath)
+		return nil
+	}
 	if idxErr := s.idx.IndexFile(filePath); idxErr != nil {
 		// File is gone or broken on disk — clear its diagnostics.
 		publishDiagnostics(n, params.TextDocument.URI, []protocol.Diagnostic{})
@@ -333,7 +372,11 @@ func (s *Server) workspaceDidChangeWatchedFiles(_ *glsp.Context, params *protoco
 		}
 		switch ev.Type {
 		case protocol.FileChangeTypeCreated, protocol.FileChangeTypeChanged:
-			_ = s.idx.IndexFile(filePath)
+			if s.idx.IsReleaseFile(filePath) {
+				s.idx.ReloadRelease()
+			} else {
+				_ = s.idx.IndexFile(filePath)
+			}
 			if n != nil {
 				s.publishDiagnosticsForFile(n, filePath)
 				s.republishOpenFiles(n, filePath)
@@ -489,8 +532,7 @@ func (s *Server) publishDiagnosticsBackground(filePath string) {
 	if s.idx == nil {
 		return
 	}
-	sf := s.idx.FileSliceFile(filePath)
-	if sf == nil {
+	if !s.idx.IsReleaseFile(filePath) && s.idx.FileSliceFile(filePath) == nil {
 		return
 	}
 	s.notifyMu.Lock()

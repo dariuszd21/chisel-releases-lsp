@@ -49,6 +49,11 @@ func (s *Server) textDocumentHover(_ *glsp.Context, params *protocol.HoverParams
 	}
 
 	md := renderSliceMarkdown(pkg, sliceName, is.Def)
+	// Store-backed packages are fetched from a store channel rather than an
+	// archive, which is essential context when reading a slice.
+	if def := s.idx.FileSliceFile(is.File); def != nil && def.Store != "" {
+		md += fmt.Sprintf("\n**Store:** `%s` (default track `%s`)\n", def.Store, def.DefaultTrack)
+	}
 	return &protocol.Hover{
 		Contents: protocol.MarkupContent{
 			Kind:  protocol.MarkupKindMarkdown,
@@ -66,15 +71,28 @@ func renderSliceMarkdown(pkg, sliceName string, sd *parser.SliceDef) string {
 	if len(sd.Essential) > 0 {
 		sb.WriteString("**Essential:**\n")
 		for _, e := range sd.Essential {
-			fmt.Fprintf(&sb, "- `%s`\n", e.Value)
+			fmt.Fprintf(&sb, "- `%s`%s\n", e.Value, channelSuffix(e.Channel))
 		}
 		sb.WriteString("\n")
 	}
 	if len(sd.Contents) > 0 {
 		sb.WriteString("**Contents:**\n")
 		for _, c := range sd.Contents {
-			fmt.Fprintf(&sb, "- `%s`\n", c.Path)
+			fmt.Fprintf(&sb, "- `%s`%s\n", c.Path, channelSuffix(c.Channel))
 		}
 	}
 	return sb.String()
+}
+
+// channelSuffix renders the channel constraints of an entry as a short
+// parenthesised suffix, or "" when the entry applies to every channel.
+func channelSuffix(patterns []parser.ChannelPattern) string {
+	if len(patterns) == 0 {
+		return ""
+	}
+	values := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		values = append(values, p.Value)
+	}
+	return " — channel `" + strings.Join(values, "`, `") + "`"
 }

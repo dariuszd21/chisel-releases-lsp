@@ -30,6 +30,19 @@ type ContentEntry struct {
 	Prefer        string // value of the prefer: attribute; empty if absent
 	PreferRange   Range  // range of the prefer value, for diagnostics
 	HasAttributes bool   // true when the entry has any YAML value attributes (mode, text, copy, …)
+	// Channel holds the channel: patterns restricting this entry to certain
+	// store channels (format v3+, store-backed packages only). Empty when the
+	// entry applies to every channel.
+	Channel []ChannelPattern
+	// ChannelKeyRange is the range of the `channel:` key itself, used to report
+	// errors that concern the field as a whole rather than one pattern.
+	ChannelKeyRange Range
+}
+
+// ChannelPattern is one value of a `channel:` field together with its position.
+type ChannelPattern struct {
+	Value string
+	Range Range
 }
 
 // SliceDef represents a single named slice inside a package.
@@ -45,12 +58,31 @@ type SliceDef struct {
 type EssentialRef struct {
 	Value      string
 	ValueRange Range
+	// Channel holds the channel: patterns of a v3 map-style essential entry
+	// (format v3+, store-backed packages only). Empty when unconstrained.
+	Channel []ChannelPattern
+	// ChannelKeyRange is the range of the `channel:` key of this entry.
+	ChannelKeyRange Range
 }
 
 // SliceFile is the fully parsed representation of a slice definitions file.
 type SliceFile struct {
+	// Package is the value of the `package:` field, i.e. the package name as
+	// known in the archive or the store. For store-backed packages the unique
+	// name used in slice references is this value prefixed with the store's
+	// default-prefix; see index.Index for the resolved name.
 	Package      string
 	PackageRange Range
+	// Archive is the value of the optional `archive:` field.
+	Archive      string
+	ArchiveRange Range
+	// Store is the value of the optional `store:` field (format v3+).
+	Store      string
+	StoreRange Range
+	// DefaultTrack is the value of the optional `default-track:` field, which
+	// is required for and only valid on store-backed packages (format v3+).
+	DefaultTrack      string
+	DefaultTrackRange Range
 	// Top-level essential (applied to all slices in this package)
 	Essential []EssentialRef
 	Slices    map[string]*SliceDef
@@ -110,6 +142,15 @@ func parseSliceFile(mapping *yaml.Node) (*SliceFile, error) {
 		case "package":
 			sf.Package = val.Value
 			sf.PackageRange = nodeRange(val)
+		case "archive":
+			sf.Archive = val.Value
+			sf.ArchiveRange = nodeRange(val)
+		case "store":
+			sf.Store = val.Value
+			sf.StoreRange = nodeRange(val)
+		case "default-track":
+			sf.DefaultTrack = val.Value
+			sf.DefaultTrackRange = nodeRange(val)
 		case "essential", "v3-essential":
 			refs, err := parseEssentialList(val)
 			if err != nil {
@@ -174,6 +215,7 @@ func parseSliceDef(name string, nameRange Range, body *yaml.Node) (*SliceDef, er
 //
 // Arch constraints in v3 map values are silently ignored — the LSP indexes all
 // refs regardless of architecture so completion and references work on any target.
+// Channel constraints, in contrast, are retained so they can be validated.
 func parseEssentialList(node *yaml.Node) ([]EssentialRef, error) {
 	var refs []EssentialRef
 	switch node.Kind {
@@ -186,18 +228,50 @@ func parseEssentialList(node *yaml.Node) ([]EssentialRef, error) {
 			})
 		}
 	case yaml.MappingNode:
-		// v3: map syntax "pkg_slice:" or "pkg_slice: {arch: amd64}"
+		// v3: map syntax "pkg_slice:", "pkg_slice: {arch: amd64}" or
+		// "pkg_slice: {channel: 2.0/edge}".
 		// Also handles v3-essential: back-compat field in v1/v2 files.
 		pairs := node.Content
 		for i := 0; i+1 < len(pairs); i += 2 {
-			key := pairs[i]
-			refs = append(refs, EssentialRef{
+			key, val := pairs[i], pairs[i+1]
+			ref := EssentialRef{
 				Value:      key.Value,
 				ValueRange: nodeRange(key),
-			})
+			}
+			ref.Channel, ref.ChannelKeyRange = channelFromAttributes(val)
+			refs = append(refs, ref)
 		}
 	}
 	return refs, nil
+}
+
+// channelFromAttributes extracts the `channel:` patterns from an attribute
+// mapping such as an essential entry value or a contents entry value. The
+// field accepts a single scalar or a sequence of scalars. The returned range is
+// that of the `channel:` key, zero when the field is absent.
+func channelFromAttributes(val *yaml.Node) ([]ChannelPattern, Range) {
+	if val == nil || val.Kind != yaml.MappingNode {
+		return nil, Range{}
+	}
+	for i := 0; i+1 < len(val.Content); i += 2 {
+		key, attr := val.Content[i], val.Content[i+1]
+		if key.Value != "channel" {
+			continue
+		}
+		keyRange := nodeRange(key)
+		switch attr.Kind {
+		case yaml.ScalarNode:
+			return []ChannelPattern{{Value: attr.Value, Range: nodeRange(attr)}}, keyRange
+		case yaml.SequenceNode:
+			patterns := make([]ChannelPattern, 0, len(attr.Content))
+			for _, item := range attr.Content {
+				patterns = append(patterns, ChannelPattern{Value: item.Value, Range: nodeRange(item)})
+			}
+			return patterns, keyRange
+		}
+		return nil, keyRange
+	}
+	return nil, Range{}
 }
 
 func parseContents(node *yaml.Node) ([]ContentEntry, error) {
@@ -222,9 +296,9 @@ func parseContents(node *yaml.Node) ([]ContentEntry, error) {
 				if attrKey.Value == "prefer" {
 					ce.Prefer = attrVal.Value
 					ce.PreferRange = nodeRange(attrVal)
-					break
 				}
 			}
+			ce.Channel, ce.ChannelKeyRange = channelFromAttributes(val)
 		}
 		entries = append(entries, ce)
 	}
