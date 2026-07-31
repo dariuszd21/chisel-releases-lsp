@@ -120,6 +120,7 @@ func (s *Server) ExportPublishDiagnosticsForFile(n Notifier, filePath string) {
 func (s *Server) ExportRepublishOpenFiles(n Notifier, skipPath string) {
 	s.republishOpenFiles(n, skipPath)
 }
+
 func (s *Server) SetDocForTest(filePath, text string) {
 	s.setDoc(filePath, text)
 }
@@ -163,6 +164,42 @@ func (s *Server) ExportCompletion(filePath, text string, line, char int) []proto
 // ExportCompletionPrefixAndRange exposes completionPrefixAndRange for testing.
 func ExportCompletionPrefixAndRange(text string, line, char int) (string, protocol.Range, bool, bool) {
 	return completionPrefixAndRange(text, line, char)
+}
+
+// ExportChannelValueBeforeCursor exposes channelValueBeforeCursor for testing.
+func ExportChannelValueBeforeCursor(text string, line, char int) (string, int, bool) {
+	return channelValueBeforeCursor(text, line, char)
+}
+
+// ExportChannelRiskFixes exposes channelRiskFixes for testing.
+func ExportChannelRiskFixes(lines []string, r protocol.Range) []string {
+	return channelRiskFixes(lines, r)
+}
+
+// ExportComputeReleaseDiagnostics exposes computeReleaseDiagnostics for testing.
+func (s *Server) ExportComputeReleaseDiagnostics(filePath string) []protocol.Diagnostic {
+	return s.computeReleaseDiagnostics(filePath)
+}
+
+// ExportDefinition calls textDocumentDefinition and returns the locations.
+func (s *Server) ExportDefinition(filePath string, line, char int) ([]protocol.Location, error) {
+	uri := filePathToURI(filePath)
+	result, err := s.textDocumentDefinition(nil, &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+			Position:     protocol.Position{Line: uint32(line), Character: uint32(char)},
+		},
+	})
+	if err != nil || result == nil {
+		return nil, err
+	}
+	switch v := result.(type) {
+	case []protocol.Location:
+		return v, nil
+	case protocol.Location:
+		return []protocol.Location{v}, nil
+	}
+	return nil, nil
 }
 
 // ExportSortedBlockText exposes sortedBlockText for testing.

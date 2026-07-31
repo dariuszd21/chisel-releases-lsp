@@ -29,6 +29,10 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 | **Duplicate slice detection** — warn when the same `pkg_slice` is defined in more than one file | `textDocument/publishDiagnostics` |
 | **Missing copyright essential** — warn when a slice doesn't reference `<pkg>_copyright` | `textDocument/publishDiagnostics` |
 | **Duplicate essential references** — warn when the same `pkg_slice` appears more than once in the same `essential:` block | `textDocument/publishDiagnostics` |
+| **Release validation** — flag unknown `format:` versions and malformed `stores:` entries in `chisel.yaml` | `textDocument/publishDiagnostics` |
+| **`store:` / `default-track:` validation** — flag store fields used before format v3, unknown stores, `store:`+`archive:` conflicts, and misplaced definition files | `textDocument/publishDiagnostics` |
+| **`channel:` validation** — flag malformed channel patterns, repeated tracks, and `channel:` on non-store packages | `textDocument/publishDiagnostics` |
+| **`channel:` completions** — suggest `<track>/<risk>` patterns inside a `channel:` value | `textDocument/completion` |
 
 ---
 
@@ -112,7 +116,7 @@ roots = ["chisel.yaml"]
 
 ## How it works
 
-The server loads all `slices/*.yaml` files from the workspace root into an in-memory index on startup, then watches the directory for changes. As you edit:
+The server reads `chisel.yaml` from the workspace root to learn the release format and the store definitions, then loads all `slices/*.yaml` files (plus `bin-slices/*.yaml` in format v3) into an in-memory index and watches those directories for changes. As you edit:
 
 - **Completions** are offered whenever the cursor is inside an `essential:` list item.
 - **Go to definition** resolves `<pkg>_<slice>` tokens to the exact line in `slices/<pkg>.yaml`.
@@ -132,9 +136,17 @@ The server loads all `slices/*.yaml` files from the workspace root into an in-me
   - Duplicate slice definitions — the same `pkg_slice` key declared in more than one file.
   - Missing copyright essential — a slice that doesn't reference `<pkg>_copyright` in its effective essentials (package-level or slice-level); the `copyright` slice itself is exempt.
   - Duplicate essential references — the same `pkg_slice` listed more than once in the same `essential:` block; diagnostics include `relatedInformation` pointing to the first occurrence.
-- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, a *Go to conflicting slice* action for path collisions, *Add `<pkg>_copyright` to package essentials* for the missing-copyright diagnostic (inserts into the top-level `essential:` block, covering all slices at once; format matches the file's existing v1/v2 or v3 style), and *Sort entries lexically* for out-of-order `contents:` or `essential:` blocks.
-- **Hover** renders a markdown summary of a slice's contents and its own essential dependencies.
+  - Release definition errors in `chisel.yaml` — an unknown `format:` version, `stores:` used before format v3, a store missing `kind`, `version` or `default-prefix`, or a store with an unknown `kind`.
+  - Store field errors in a slice file — `store:` or `default-track:` used before format v3, `store:` naming a store that `chisel.yaml` does not define, `store:` combined with `archive:`, `store:` without `default-track:` (and vice versa), a `default-track:` that carries a risk, or a store-backed definition placed in the wrong directory for the release format.
+  - Invalid `channel:` patterns — a malformed `<track>/<risk>` value, an unknown risk, a misused `*`/`!`/`,` operator, a track repeated within one field, or `channel:` on a package that is not in a store.
+- **Quick fixes** (lightbulb / `Ctrl+.`) offer one-click corrections for unknown/invalid references, package name mismatches, a *Go to conflicting slice* action for path collisions, *Add `<pkg>_copyright` to package essentials* for the missing-copyright diagnostic (inserts into the top-level `essential:` block, covering all slices at once; format matches the file's existing v1/v2 or v3 style), *Sort entries lexically* for out-of-order `contents:` or `essential:` blocks, and *Change channel to …* for an invalid `channel:` risk.
+- **Hover** renders a markdown summary of a slice's contents and its own essential dependencies, including the store and `default-track:` for store-backed packages and any per-entry `channel:` constraints.
 - **v3 format** (`essential:` as a YAML mapping with optional per-entry arch filters) is fully supported alongside the classic v1/v2 sequence format.
+- **v4 format** and store-backed packages are supported: `chisel.yaml` `stores:`, the package-level `store:` and `default-track:` fields, and the per-entry `channel:` field on `contents:` paths and `essential:` references.
+  - Store-backed packages are indexed under their **unique prefixed name** — the store's `default-prefix` plus the `package:` value (e.g. `package: curl` in the `bin` store becomes `bin-curl`). Completion, go-to-definition, references, rename, hover and the document outline all use that prefixed name, because that is what slice references and `prefer:` values must name.
+  - In **format v3** store-backed definitions live in `bin-slices/`, kept apart so that Chisel versions without store support (which only read `slices/`) never see the new fields. That directory is indexed and watched in addition to `slices/`. From **format v4** onwards they live in `slices/` alongside regular definitions, and `bin-slices/` is not read.
+  - `chisel.yaml` is watched as well: changing `format:` or a store's `default-prefix` re-resolves every package name and re-runs all diagnostics immediately, without a restart.
+  - Path conflicts are computed **irrespective of `channel:`**, exactly as chisel treats `arch:`. Using either field to partition the set of paths would permit combinations that are overly complex and brittle, so chisel is deliberately stricter — and the LSP matches it. A path claimed by one package on `3.0/stable` and by another on `3.0/edge` is still reported as a collision, even though the two are never cut together. `channel:` only affects which content is extracted for a concrete channel.
 
 ---
 
@@ -179,6 +191,57 @@ slices:
       /usr/bin/mybin:
 ```
 
+**v4 format** — store-backed packages with channel filtering:
+
+```yaml
+# chisel.yaml
+format: v4
+stores:
+  bin:
+    kind: bin
+    version: 26.10
+    default-prefix: "bin-"   # package: curl → unique name bin-curl
+```
+
+```yaml
+# slices/curl.yaml  (bin-slices/curl.yaml in format v3)
+package: curl                # the name in the store; unique name is bin-curl
+store: bin                   # mutually exclusive with archive:
+default-track: "3.0"         # required with store:, must be a bare track
+
+slices:
+  bins:
+    essential:
+      bin-curl_copyright:     # references use the prefixed unique name
+      libssl3_libs:
+        channel: 3.0/edge     # only when curl is cut from 3.0/edge
+    contents:
+      /usr/bin/curl:
+      /usr/bin/curl-config:
+        channel: [3.0/*, 2.0/!stable]
+
+  copyright:
+    contents:
+      /usr/share/doc/curl/copyright:
+```
+
+Note that the `essential:` reference is `bin-curl_copyright`, not
+`curl_copyright`: within a store-backed package, a slice's own siblings are
+referenced by the package's **unique prefixed name** too.
+
+A `channel:` value is a `<track>/<risk>` pattern, or a list of them. The track is
+a literal; only the risk accepts operators:
+
+| Pattern | Meaning |
+|---------|---------|
+| `3.0/edge` | exactly that channel |
+| `3.0/*` | any risk of the `3.0` track |
+| `3.0/!stable` | any risk of `3.0` except `stable` |
+| `3.0/beta,edge` | only those risks of `3.0` |
+
+Valid risks are `stable`, `candidate`, `beta` and `edge`. A track may appear at
+most once per `channel:` field so the resulting channel set is unambiguous.
+
 See the [chisel documentation](https://documentation.ubuntu.com/chisel/en/latest/) for the full schema reference.
 
 ---
@@ -201,8 +264,11 @@ go build ./cmd/chisel-releases-lsp
 cmd/chisel-releases-lsp/   # Entry point
 internal/
   parser/                  # Position-aware YAML parser (gopkg.in/yaml.v3 Node API)
+                           #   parser.go  — slice definition files
+                           #   release.go — chisel.yaml (format, archives, stores)
   index/                   # In-memory slice index + fsnotify watcher
-  analysis/                # Content path validation + collision detection
+  analysis/                # Content path validation, collision detection,
+                           # store field + channel pattern validation
   lsp/                     # LSP method handlers (glsp)
 ```
 
@@ -252,3 +318,4 @@ Settings can be provided either at the top level or nested under a
 - [x] Content path validation — validate using chisel's own rules (`?`, `*`, `**`; `[` and `]` are literal filename characters, not metacharacters)
 - [x] Lexical sort check — warn when `contents:` paths or `essential:` entries are not in lexical order, with a quick fix to sort them
 - [x] `prefer`-aware collision detection — suppress collision warnings when an entry carries `prefer: <package>` pointing at the conflicting package; validate that `prefer` values are not used on globs, reference a different package, and name a package that exists in the release
+- [x] Format v4 and store-backed packages — parse `chisel.yaml` (`format:`, `stores:`), resolve unique prefixed package names, index `bin-slices/` in format v3, and validate the `store:`, `default-track:` and `channel:` fields

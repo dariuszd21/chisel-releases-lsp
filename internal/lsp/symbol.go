@@ -46,12 +46,22 @@ func (s *Server) textDocumentDocumentSymbol(_ *glsp.Context, params *protocol.Do
 		children = append(children, sym)
 	}
 
+	// Store-backed packages are known by their prefixed unique name, which is
+	// what slice references use, so show that in the outline.
+	pkgName := s.idx.PackageName(filePath)
+	if pkgName == "" {
+		pkgName = sf.Package
+	}
 	pkgSym := protocol.DocumentSymbol{
-		Name:           sf.Package,
+		Name:           pkgName,
 		Kind:           protocol.SymbolKindModule,
 		Range:          pkgRange,
 		SelectionRange: pkgRange,
 		Children:       children,
+	}
+	if sf.Store != "" {
+		detail := fmt.Sprintf("store %s, default-track %s", sf.Store, sf.DefaultTrack)
+		pkgSym.Detail = &detail
 	}
 	return []protocol.DocumentSymbol{pkgSym}, nil
 }

@@ -29,7 +29,16 @@ type Index struct {
 	// slices maps pkg → slice-name → IndexedSlice
 	slices map[string]map[string]*IndexedSlice
 	// files maps absolute file path → *parser.SliceFile
-	files   map[string]*parser.SliceFile
+	files map[string]*parser.SliceFile
+	// pkgNames maps absolute file path → the unique package name of that file,
+	// which is the `package:` value prefixed with the store's default-prefix for
+	// store-backed packages (e.g. "curl" in a "bin" store becomes "bin-curl").
+	pkgNames map[string]string
+	// release holds the parsed chisel.yaml of the workspace root, or nil when
+	// the root has no chisel.yaml (or it could not be parsed).
+	release *parser.Release
+	// root is the release root directory (the one holding chisel.yaml).
+	root    string
 	watcher *fsnotify.Watcher
 	// onChange is called (on a goroutine) after a file is created or updated.
 	onChange func(filePath string)
@@ -37,20 +46,28 @@ type Index struct {
 	onDelete func(filePath string)
 }
 
-// New creates an Index for the given release root (directory containing `slices/`).
+// New creates an Index for the given release root (directory containing
+// `chisel.yaml` and `slices/`). In format v3 the additional `bin-slices/`
+// directory, which holds store-backed package definitions, is indexed and
+// watched as well.
 // onChange is invoked after each file create/update; onDelete after each removal.
 // Either callback may be nil.
 func New(releaseRoot string, onChange func(filePath string), onDelete func(filePath string)) (*Index, error) {
 	idx := &Index{
 		slices:   make(map[string]map[string]*IndexedSlice),
 		files:    make(map[string]*parser.SliceFile),
+		pkgNames: make(map[string]string),
+		root:     releaseRoot,
 		onChange: onChange,
 		onDelete: onDelete,
 	}
 
-	slicesDir := filepath.Join(releaseRoot, "slices")
-	if err := idx.loadAll(slicesDir); err != nil {
-		return nil, err
+	idx.loadRelease()
+
+	for _, dir := range idx.sliceDirs() {
+		if err := idx.loadAll(dir); err != nil {
+			return nil, err
+		}
 	}
 
 	w, err := fsnotify.NewWatcher()
@@ -59,14 +76,168 @@ func New(releaseRoot string, onChange func(filePath string), onDelete func(fileP
 	}
 	idx.watcher = w
 
-	if _, statErr := os.Stat(slicesDir); statErr == nil {
-		if err := w.Add(slicesDir); err != nil {
-			return nil, fmt.Errorf("watching %s: %w", slicesDir, err)
+	for _, dir := range idx.sliceDirs() {
+		if _, statErr := os.Stat(dir); statErr != nil {
+			continue
+		}
+		if err := w.Add(dir); err != nil {
+			return nil, fmt.Errorf("watching %s: %w", dir, err)
+		}
+	}
+	// Watch the release root too: a change to chisel.yaml alters the format and
+	// the store prefixes, and therefore the whole index.
+	if _, statErr := os.Stat(releaseRoot); statErr == nil {
+		if err := w.Add(releaseRoot); err != nil {
+			return nil, fmt.Errorf("watching %s: %w", releaseRoot, err)
 		}
 	}
 
-	go idx.watchLoop(slicesDir)
+	go idx.watchLoop()
 	return idx, nil
+}
+
+// sliceDirs returns the absolute directories that hold slice definition files.
+// It is always "slices/", plus "bin-slices/" in the formats that keep
+// store-backed definitions apart (v3).
+func (idx *Index) sliceDirs() []string {
+	dirs := []string{filepath.Join(idx.root, "slices")}
+	if storeDir := idx.Release().StoreSlicesDir(); storeDir != "slices" {
+		dirs = append(dirs, filepath.Join(idx.root, storeDir))
+	}
+	return dirs
+}
+
+// loadRelease parses chisel.yaml from the release root. A missing or malformed
+// chisel.yaml is not fatal: the index then behaves as if the release used the
+// oldest format, so no format-gated diagnostic is ever reported.
+func (idx *Index) loadRelease() {
+	rel, err := parser.ParseReleaseFile(idx.ReleaseFilePath())
+	if err != nil {
+		return
+	}
+	idx.mu.Lock()
+	idx.release = rel
+	idx.mu.Unlock()
+}
+
+// Release returns the parsed chisel.yaml of the release, or nil when the
+// workspace root has none.
+func (idx *Index) Release() *parser.Release {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.release
+}
+
+// Root returns the release root directory.
+func (idx *Index) Root() string { return idx.root }
+
+// ReleaseFilePath returns the absolute path of the release's chisel.yaml.
+func (idx *Index) ReleaseFilePath() string {
+	return filepath.Join(idx.root, "chisel.yaml")
+}
+
+// IsReleaseFile reports whether absPath is the release's chisel.yaml.
+func (idx *Index) IsReleaseFile(absPath string) bool {
+	return absPath == idx.ReleaseFilePath()
+}
+
+// ReloadRelease re-parses chisel.yaml and re-indexes every slice file, which is
+// required because the format and the store prefixes both affect how package
+// names resolve.
+func (idx *Index) ReloadRelease() {
+	idx.loadRelease()
+	idx.reindexAllSliceFiles()
+}
+
+// UpdateRelease replaces the release definition with one parsed from content
+// (used for the unsaved editor buffer of chisel.yaml) and re-indexes every
+// slice file. It returns the parse error, if any, leaving the previous release
+// in place in that case.
+func (idx *Index) UpdateRelease(content []byte) error {
+	rel, err := parser.ParseReleaseBytes(content)
+	if err != nil {
+		return err
+	}
+	idx.mu.Lock()
+	idx.release = rel
+	idx.mu.Unlock()
+	idx.reindexAllSliceFiles()
+	return nil
+}
+
+// reindexAllSliceFiles drops and reloads every slice file from disk. It also
+// re-syncs the watches, because a format change moves store-backed definitions
+// between "slices/" and "bin-slices/".
+func (idx *Index) reindexAllSliceFiles() {
+	idx.mu.Lock()
+	paths := make([]string, 0, len(idx.files))
+	for p := range idx.files {
+		paths = append(paths, p)
+	}
+	for _, p := range paths {
+		idx.removeFile(p)
+	}
+	idx.mu.Unlock()
+	for _, dir := range idx.sliceDirs() {
+		_ = idx.loadAll(dir)
+	}
+	idx.syncWatches()
+}
+
+// syncWatches makes the watcher observe exactly the current slice directories
+// plus the release root. Adding an already-watched path is a no-op in fsnotify,
+// so this is safe to call repeatedly.
+func (idx *Index) syncWatches() {
+	if idx.watcher == nil {
+		return
+	}
+	want := map[string]bool{idx.root: true}
+	for _, dir := range idx.sliceDirs() {
+		want[dir] = true
+	}
+	for _, dir := range idx.watcher.WatchList() {
+		if !want[dir] {
+			_ = idx.watcher.Remove(dir)
+		}
+	}
+	for dir := range want {
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		_ = idx.watcher.Add(dir)
+	}
+}
+
+// PackageName returns the unique package name of an indexed file, which for
+// store-backed packages includes the store's default-prefix. It falls back to
+// the raw `package:` value when the file is not indexed.
+func (idx *Index) PackageName(absPath string) string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	if name, ok := idx.pkgNames[absPath]; ok {
+		return name
+	}
+	if sf, ok := idx.files[absPath]; ok {
+		return sf.Package
+	}
+	return ""
+}
+
+// resolvePackageName returns the unique package name for a slice file: the
+// `package:` value, prefixed with the store's default-prefix when the file
+// declares a `store:` that the release defines. Caller must hold mu.
+func (idx *Index) resolvePackageName(sf *parser.SliceFile) string {
+	if sf.Package == "" || sf.Store == "" {
+		return sf.Package
+	}
+	if idx.release == nil {
+		return sf.Package
+	}
+	store := idx.release.Stores[sf.Store]
+	if store == nil {
+		return sf.Package
+	}
+	return store.DefaultPrefix + sf.Package
 }
 
 // Close stops the file watcher.
@@ -205,14 +376,16 @@ func (idx *Index) DeleteFile(absPath string) {
 func (idx *Index) applySliceFile(absPath string, sf *parser.SliceFile) {
 	idx.removeFile(absPath)
 	idx.files[absPath] = sf
-	if sf.Package == "" {
+	pkgName := idx.resolvePackageName(sf)
+	if pkgName == "" {
 		return
 	}
-	if idx.slices[sf.Package] == nil {
-		idx.slices[sf.Package] = make(map[string]*IndexedSlice)
+	idx.pkgNames[absPath] = pkgName
+	if idx.slices[pkgName] == nil {
+		idx.slices[pkgName] = make(map[string]*IndexedSlice)
 	}
 	for name, sd := range sf.Slices {
-		idx.slices[sf.Package][name] = &IndexedSlice{
+		idx.slices[pkgName][name] = &IndexedSlice{
 			File:         absPath,
 			Def:          sd,
 			PackageRange: sf.PackageRange,
@@ -227,15 +400,17 @@ func (idx *Index) removeFile(absPath string) {
 		return
 	}
 	delete(idx.files, absPath)
-	if sf.Package == "" {
+	pkgName := idx.pkgNames[absPath]
+	delete(idx.pkgNames, absPath)
+	if pkgName == "" {
 		return
 	}
-	pkgMap := idx.slices[sf.Package]
+	pkgMap := idx.slices[pkgName]
 	for name := range sf.Slices {
 		delete(pkgMap, name)
 	}
 	if len(pkgMap) == 0 {
-		delete(idx.slices, sf.Package)
+		delete(idx.slices, pkgName)
 	}
 }
 
@@ -260,7 +435,7 @@ func (idx *Index) loadAll(slicesDir string) error {
 	return nil
 }
 
-func (idx *Index) watchLoop(_ string) {
+func (idx *Index) watchLoop() {
 	for {
 		select {
 		case event, ok := <-idx.watcher.Events:
@@ -268,6 +443,18 @@ func (idx *Index) watchLoop(_ string) {
 				return
 			}
 			if !strings.HasSuffix(event.Name, ".yaml") {
+				continue
+			}
+			if idx.IsReleaseFile(event.Name) {
+				idx.ReloadRelease()
+				if idx.onChange != nil {
+					go idx.onChange(event.Name)
+				}
+				continue
+			}
+			// Ignore other YAML files sitting directly in the release root;
+			// only slice directories hold slice definitions.
+			if filepath.Dir(event.Name) == idx.root {
 				continue
 			}
 			switch {

@@ -25,6 +25,9 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 	if s.idx == nil {
 		return nil
 	}
+	if s.idx.IsReleaseFile(filePath) {
+		return s.computeReleaseDiagnostics(filePath)
+	}
 	sf := s.idx.FileSliceFile(filePath)
 	if sf == nil {
 		return nil
@@ -143,7 +146,7 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 	}
 
 	// 6. Missing copyright essential in slice definitions.
-	for _, d := range analysis.CheckCopyrightEssential(filePath, sf) {
+	for _, d := range analysis.CheckCopyrightEssential(filePath, sf, s.idx.PackageName(filePath)) {
 		diags = append(diags, protocol.Diagnostic{
 			Range:    toProtocolRange(d.Range),
 			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
@@ -236,6 +239,30 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 		})
 	}
 
+	release := s.idx.Release()
+
+	// 12. Store field validation (store:, default-track:, file placement).
+	for _, d := range analysis.CheckStoreFields(filePath, sf, release) {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.Range),
+			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
+			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeInvalidStore),
+			Message:  d.Message,
+		})
+	}
+
+	// 13. Channel pattern validation on contents: and essential: entries.
+	for _, d := range analysis.CheckChannels(filePath, sf, release) {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.Range),
+			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
+			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeInvalidChannel),
+			Message:  d.Message,
+		})
+	}
+
 	// Cache the line→code map so computeCodeActions can look up diagnostic codes
 	// without re-running all checks.
 	lineCode := make(map[uint32]string, len(diags))
@@ -250,6 +277,26 @@ func (s *Server) computeDiagnostics(filePath string) []protocol.Diagnostic {
 	s.diagLineCode[filePath] = lineCode
 	s.diagCacheMu.Unlock()
 
+	return diags
+}
+
+// computeReleaseDiagnostics returns the diagnostics for the release definition
+// file (chisel.yaml): unknown format versions and malformed `stores:` entries.
+func (s *Server) computeReleaseDiagnostics(filePath string) []protocol.Diagnostic {
+	rel := s.idx.Release()
+	if rel == nil {
+		return nil
+	}
+	diags := []protocol.Diagnostic{}
+	for _, d := range analysis.CheckRelease(filePath, rel) {
+		diags = append(diags, protocol.Diagnostic{
+			Range:    toProtocolRange(d.Range),
+			Severity: severityPtr(protocol.DiagnosticSeverity(d.Severity)),
+			Source:   strPtr("chisel-releases-lsp"),
+			Code:     diagCodePtr(DiagCodeInvalidRelease),
+			Message:  d.Message,
+		})
+	}
 	return diags
 }
 
